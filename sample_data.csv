@@ -1,0 +1,101 @@
+customer_id,age,gender,location,tenure_months,monthly_charges,total_charges,num_products,num_logins_last30,support_tickets,last_login_days,contract_type,payment_method,churn
+C001,32,Male,New York,24,65.5,1572.0,2,18,1,3,Month-to-month,Credit card,0
+C002,45,Female,Los Angeles,12,85.0,1020.0,1,5,4,22,Month-to-month,Electronic check,1
+C003,28,Male,Chicago,36,55.0,1980.0,3,25,0,1,Two year,Credit card,0
+C004,52,Female,Houston,8,95.0,760.0,1,2,6,35,Month-to-month,Mailed check,1
+C005,38,Male,Phoenix,48,45.0,2160.0,4,30,0,2,One year,Bank transfer,0
+C006,29,Female,Philadelphia,6,75.0,450.0,1,3,5,28,Month-to-month,Electronic check,1
+C007,41,Male,San Antonio,60,55.0,3300.0,3,22,1,4,Two year,Credit card,0
+C008,35,Female,San Diego,18,70.0,1260.0,2,15,2,8,One year,Bank transfer,0
+C009,47,Male,Dallas,3,90.0,270.0,1,1,8,45,Month-to-month,Electronic check,1
+C010,31,Female,San Jose,30,60.0,1800.0,2,20,1,5,One year,Credit card,0
+C011,55,Male,Austin,72,50.0,3600.0,4,28,0,1,Two year,Bank transfer,0
+C012,26,Female,Jacksonville,4,80.0,320.0,1,2,7,40,Month-to-month,Electronic check,1
+C013,39,Male,Fort Worth,42,65.0,2730.0,3,19,1,6,One year,Credit card,0
+C014,44,Female,Columbus,9,88.0,792.0,1,4,5,30,Month-to-month,Mailed check,1
+C015,33,Male,Charlotte,54,52.0,2808.0,3,26,0,3,Two year,Bank transfer,0
+C016,27,Female,Indianapolis,5,78.0,390.0,1,3,6,38,Month-to-month,Electronic check,1
+C017,48,Male,San Francisco,66,48.0,3168.0,4,24,1,2,Two year,Credit card,0
+C018,36,Female,Seattle,15,72.0,1080.0,2,12,3,12,Month-to-month,Bank transfer,0
+C019,42,Male,Denver,7,92.0,644.0,1,2,7,42,Month-to-month,Electronic check,1
+C020,30,Female,Nashville,27,58.0,1566.0,2,17,2,7,One year,Credit card,0
+C021,53,Male,Oklahoma City,78,46.0,3588.0,4,29,0,1,Two year,Bank transfer,0
+C022,25,Female,El Paso,3,82.0,246.0,1,1,9,50,Month-to-month,Electronic check,1
+C023,37,Male,Boston,45,63.0,2835.0,3,21,1,5,One year,Credit card,0
+C024,46,Female,Portland,11,87.0,957.0,1,4,5,28,Month-to-month,Mailed check,1
+C025,34,Male,Las Vegas,57,51.0,2907.0,3,25,0,2,Two year,Bank transfer,0
+C026,28,Female,Memphis,6,76.0,456.0,1,3,6,35,Month-to-month,Electronic check,1
+C027,50,Male,Louisville,69,49.0,3381.0,4,27,0,1,Two year,Credit card,0
+C028,35,Female,Baltimore,16,71.0,1136.0,2,13,3,10,Month-to-month,Bank transfer,0
+C029,43,Male,Milwaukee,8,91.0,728.0,1,2,8,45,Month-to-month,Electronic check,1
+C030,31,Female,Albuquerque,33,57.0,1881.0,2,19,1,6,One year,Credit card,0
+C031,56,Male,Tucson,84,47.0,3948.0,4,30,0,1,Two year,Bank transfer,0
+C032,24,Female,Fresno,2,83.0,166.0,1,1,10,55,Month-to-month,Electronic check,1
+C033,40,Male,Sacramento,51,64.0,3264.0,3,22,1,4,One year,Credit card,0
+C034,45,Female,Mesa,10,86.0,860.0,1,4,5,32,Month-to-month,Mailed check,1
+C035,32,Male,Kansas City,63,53.0,3339.0,3,26,0,2,Two year,Bank transfer,0
+C036,29,Female,Atlanta,5,77.0,385.0,1,2,7,40,Month-to-month,Electronic check,1
+C037,49,Male,Omaha,75,47.0,3525.0,4,28,0,1,Two year,Credit card,0
+C038,36,Female,Colorado Springs,17,70.0,1190.0,2,14,2,9,One year,Bank transfer,0
+C039,44,Male,Raleigh,9,89.0,801.0,1,2,8,48,Month-to-month,Electronic check,1
+C040,33,Female,Long Beach,36,59.0,2124.0,2,20,1,5,One year,Credit card,0
+C041,57,Male,Virginia Beach,90,46.0,4140.0,4,31,0,1,Two year,Bank transfer,0
+C042,23,Female,Minneapolis,2,84.0,168.0,1,1,11,60,Month-to-month,Electronic check,1
+C043,38,Male,Tampa,48,62.0,2976.0,3,21,1,4,One year,Credit card,0
+C044,47,Female,New Orleans,12,87.0,1044.0,1,5,5,25,Month-to-month,Mailed check,1
+C045,35,Male,Arlington,60,52.0,3120.0,3,25,0,2,Two year,Bank transfer,0
+C046,27,Female,Wichita,4,79.0,316.0,1,2,8,42,Month-to-month,Electronic check,1
+C047,51,Male,Bakersfield,72,48.0,3456.0,4,27,0,1,Two year,Credit card,0
+C048,37,Female,Aurora,18,69.0,1242.0,2,15,2,8,One year,Bank transfer,0
+C049,42,Male,Anaheim,7,93.0,651.0,1,2,8,47,Month-to-month,Electronic check,1
+C050,30,Female,Santa Ana,30,60.0,1800.0,2,18,1,6,One year,Credit card,0
+C051,54,Male,Corpus Christi,80,46.0,3680.0,4,29,0,1,Two year,Bank transfer,0
+C052,26,Female,Riverside,3,81.0,243.0,1,1,10,52,Month-to-month,Electronic check,1
+C053,39,Male,Lexington,45,63.0,2835.0,3,20,1,5,One year,Credit card,0
+C054,48,Female,St. Louis,13,86.0,1118.0,1,5,4,28,Month-to-month,Mailed check,1
+C055,34,Male,Pittsburgh,57,51.0,2907.0,3,24,0,2,Two year,Bank transfer,0
+C056,28,Female,Anchorage,5,75.0,375.0,1,3,7,38,Month-to-month,Electronic check,1
+C057,52,Male,Stockton,68,49.0,3332.0,4,26,0,1,Two year,Credit card,0
+C058,36,Female,Cincinnati,16,71.0,1136.0,2,13,2,10,One year,Bank transfer,0
+C059,43,Male,St. Paul,8,90.0,720.0,1,2,8,44,Month-to-month,Electronic check,1
+C060,31,Female,Greensboro,33,57.0,1881.0,2,18,1,6,One year,Credit card,0
+C061,58,Male,Henderson,90,46.0,4140.0,4,30,0,1,Two year,Bank transfer,0
+C062,24,Female,Newark,2,82.0,164.0,1,1,11,58,Month-to-month,Electronic check,1
+C063,40,Male,Plano,51,63.0,3213.0,3,22,1,4,One year,Credit card,0
+C064,46,Female,Lincoln,11,85.0,935.0,1,4,5,30,Month-to-month,Mailed check,1
+C065,33,Male,Orlando,63,52.0,3276.0,3,25,0,2,Two year,Bank transfer,0
+C066,29,Female,Chandler,6,76.0,456.0,1,2,7,40,Month-to-month,Electronic check,1
+C067,50,Male,Laredo,72,48.0,3456.0,4,27,0,1,Two year,Credit card,0
+C068,37,Female,Norfolk,17,70.0,1190.0,2,14,2,9,One year,Bank transfer,0
+C069,44,Male,Madison,9,88.0,792.0,1,2,8,46,Month-to-month,Electronic check,1
+C070,32,Female,Durham,36,58.0,2088.0,2,19,1,5,One year,Credit card,0
+C071,55,Male,Lubbock,84,47.0,3948.0,4,29,0,1,Two year,Bank transfer,0
+C072,25,Female,Winston-Salem,3,80.0,240.0,1,1,10,54,Month-to-month,Electronic check,1
+C073,38,Male,Garland,48,62.0,2976.0,3,21,1,4,One year,Credit card,0
+C074,47,Female,Glendale,12,87.0,1044.0,1,5,4,27,Month-to-month,Mailed check,1
+C075,35,Male,Hialeah,60,52.0,3120.0,3,25,0,2,Two year,Bank transfer,0
+C076,27,Female,Reno,4,78.0,312.0,1,2,8,42,Month-to-month,Electronic check,1
+C077,51,Male,Baton Rouge,72,48.0,3456.0,4,27,0,1,Two year,Credit card,0
+C078,37,Female,Irvine,18,70.0,1260.0,2,14,2,8,One year,Bank transfer,0
+C079,43,Male,Chesapeake,8,91.0,728.0,1,2,8,46,Month-to-month,Electronic check,1
+C080,30,Female,Irving,30,60.0,1800.0,2,18,1,6,One year,Credit card,0
+C081,53,Male,Scottsdale,78,47.0,3666.0,4,28,0,1,Two year,Bank transfer,0
+C082,26,Female,North Las Vegas,3,81.0,243.0,1,1,10,52,Month-to-month,Electronic check,1
+C083,39,Male,Fremont,45,63.0,2835.0,3,20,1,5,One year,Credit card,0
+C084,48,Female,Gilbert,13,86.0,1118.0,1,5,4,29,Month-to-month,Mailed check,1
+C085,34,Male,San Bernardino,57,51.0,2907.0,3,24,0,2,Two year,Bank transfer,0
+C086,28,Female,Birmingham,5,75.0,375.0,1,3,7,38,Month-to-month,Electronic check,1
+C087,52,Male,Rochester,68,49.0,3332.0,4,26,0,1,Two year,Credit card,0
+C088,36,Female,Richmond,16,71.0,1136.0,2,13,2,10,One year,Bank transfer,0
+C089,44,Male,Spokane,9,89.0,801.0,1,2,8,46,Month-to-month,Electronic check,1
+C090,31,Female,Des Moines,33,57.0,1881.0,2,18,1,6,One year,Credit card,0
+C091,57,Male,Montgomery,87,46.0,4002.0,4,30,0,1,Two year,Bank transfer,0
+C092,23,Female,Modesto,2,83.0,166.0,1,1,11,60,Month-to-month,Electronic check,1
+C093,40,Male,Tacoma,48,63.0,3024.0,3,21,1,4,One year,Credit card,0
+C094,46,Female,Shreveport,11,85.0,935.0,1,4,5,30,Month-to-month,Mailed check,1
+C095,33,Male,Akron,63,52.0,3276.0,3,25,0,2,Two year,Bank transfer,0
+C096,29,Female,Aurora,5,77.0,385.0,1,2,7,40,Month-to-month,Electronic check,1
+C097,50,Male,Yonkers,72,48.0,3456.0,4,27,0,1,Two year,Credit card,0
+C098,37,Female,Huntington Beach,17,69.0,1173.0,2,14,2,9,One year,Bank transfer,0
+C099,42,Male,Little Rock,8,90.0,720.0,1,2,8,46,Month-to-month,Electronic check,1
+C100,30,Female,Glendale,30,59.0,1770.0,2,18,1,5,One year,Credit card,0

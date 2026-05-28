@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChurnSight — AI-Powered Churn Prediction Dashboard</title>
+  <meta name="description" content="Predict and prevent customer churn with AI-driven analytics. Upload data, train models, and get actionable insights for Customer Success Managers." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ═══════════════════════════  SIDEBAR  ═══════════════════════════ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="url(#lg1)"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="10" r="2.5" fill="#fff"/><defs><linearGradient id="lg1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs></svg>
+    </div>
+    <span class="logo-text">ChurnSight</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <a class="nav-item active" data-section="upload" href="#" id="nav-upload">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+      Upload & Train
+    </a>
+    <a class="nav-item" data-section="overview" href="#" id="nav-overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Overview
+    </a>
+    <a class="nav-item" data-section="analytics" href="#" id="nav-analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Analytics
+    </a>
+    <a class="nav-item" data-section="customers" href="#" id="nav-customers">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      Customers
+    </a>
+    <a class="nav-item" data-section="predict" href="#" id="nav-predict">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Predict Single
+    </a>
+  </nav>
+
+  <div class="sidebar-footer">
+    <div class="model-status" id="model-status-badge">
+      <span class="status-dot inactive"></span>
+      <span>No Model Loaded</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════  MAIN  ═══════════════════════════ -->
+<main class="main-content">
+
+  <!-- TOP BAR -->
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="menu-toggle" id="menu-toggle">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <h1 class="page-title" id="page-title">Upload & Train Model</h1>
+    </div>
+    <div class="topbar-right">
+      <div class="topbar-badge" id="algo-badge" style="display:none"></div>
+      <div class="time-display" id="time-display"></div>
+    </div>
+  </header>
+
+  <!-- ── SECTION: UPLOAD ── -->
+  <section class="section active" id="section-upload">
+    <div class="upload-hero">
+      <div class="upload-hero-text">
+        <h2>Train Your Churn Prediction Model</h2>
+        <p>Upload your customer dataset to train an AI model and unlock powerful churn analytics and predictions.</p>
+      </div>
+    </div>
+
+    <div class="upload-grid">
+      <!-- Upload Card -->
+      <div class="card upload-card">
+        <h3 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+          Upload Dataset
+        </h3>
+
+        <div class="drop-zone" id="drop-zone">
+          <div class="drop-zone-icon">
+            <svg viewBox="0 0 64 64" fill="none"><rect x="8" y="8" width="48" height="48" rx="8" fill="url(#dz1)" opacity="0.15"/><polyline points="32 20 32 44" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><polyline points="22 30 32 20 42 30" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="48" x2="44" y2="48" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><defs><linearGradient id="dz1" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient><linearGradient id="dz2" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs></svg>
+          </div>
+          <p class="drop-text">Drag &amp; drop your CSV here</p>
+          <p class="drop-sub">or click to browse files</p>
+          <input type="file" id="file-input" accept=".csv" hidden />
+        </div>
+
+        <div class="file-info" id="file-info" style="display:none">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <div>
+            <span class="file-name" id="file-name-display"></span>
+            <span class="file-size" id="file-size-display"></span>
+          </div>
+          <button class="remove-file" id="remove-file">✕</button>
+        </div>
+
+        <div class="algo-select-group">
+          <label class="input-label">Algorithm</label>
+          <div class="algo-pills" id="algo-pills">
+            <button class="algo-pill active" data-algo="random_forest">Random Forest</button>
+            <button class="algo-pill" data-algo="gradient_boosting">Gradient Boosting</button>
+            <button class="algo-pill" data-algo="logistic_regression">Logistic Regression</button>
+          </div>
+        </div>
+
+        <button class="btn-primary btn-full" id="train-btn" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Train Model
+        </button>
+
+        <div class="progress-wrap" id="progress-wrap" style="display:none">
+          <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+          <span class="progress-label" id="progress-label">Processing…</span>
+        </div>
+      </div>
+
+      <!-- CSV Format Guide -->
+      <div class="card format-card">
+        <h3 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Required CSV Format
+        </h3>
+        <p class="format-desc">Your CSV must include the following columns:</p>
+        <div class="columns-grid">
+          <div class="col-item required"><span class="col-badge num">NUM</span> age</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> tenure_months</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> monthly_charges</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> total_charges</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> num_products</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> num_logins_last30</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> support_tickets</div>
+          <div class="col-item required"><span class="col-badge num">NUM</span> last_login_days</div>
+          <div class="col-item required"><span class="col-badge cat">CAT</span> gender</div>
+          <div class="col-item required"><span class="col-badge cat">CAT</span> location</div>
+          <div class="col-item required"><span class="col-badge cat">CAT</span> contract_type</div>
+          <div class="col-item required"><span class="col-badge cat">CAT</span> payment_method</div>
+          <div class="col-item required"><span class="col-badge tgt">TGT</span> churn (0 or 1)</div>
+          <div class="col-item optional"><span class="col-badge opt">OPT</span> customer_id</div>
+        </div>
+        <a class="btn-secondary btn-full" id="download-sample" href="/sample_data.csv" download>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Sample CSV
+        </a>
+      </div>
+    </div>
+
+    <!-- Error / Success Toast -->
+    <div class="toast" id="toast"></div>
+  </section>
+
+  <!-- ── SECTION: OVERVIEW ── -->
+  <section class="section" id="section-overview">
+    <div class="kpi-grid" id="kpi-grid">
+      <div class="kpi-card" id="kpi-total">
+        <div class="kpi-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-total-val">–</span><span class="kpi-label">Total Customers</span></div>
+      </div>
+      <div class="kpi-card" id="kpi-churn">
+        <div class="kpi-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-churn-val">–</span><span class="kpi-label">Churn Rate</span></div>
+      </div>
+      <div class="kpi-card" id="kpi-high">
+        <div class="kpi-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-high-val">–</span><span class="kpi-label">High Risk</span></div>
+      </div>
+      <div class="kpi-card" id="kpi-acc">
+        <div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-acc-val">–</span><span class="kpi-label">Model Accuracy</span></div>
+      </div>
+      <div class="kpi-card" id="kpi-f1">
+        <div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-f1-val">–</span><span class="kpi-label">F1 Score</span></div>
+      </div>
+      <div class="kpi-card" id="kpi-auc">
+        <div class="kpi-icon indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-auc-val">–</span><span class="kpi-label">AUC-ROC</span></div>
+      </div>
+    </div>
+
+    <div class="charts-row">
+      <div class="card chart-card">
+        <h3 class="card-title">Churn Rate Trend</h3>
+        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h3 class="card-title">Risk Distribution</h3>
+        <div class="chart-wrap chart-wrap--sm"><canvas id="riskDonutChart"></canvas></div>
+        <div class="donut-legend" id="donut-legend"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION: ANALYTICS ── -->
+  <section class="section" id="section-analytics">
+    <div class="analytics-grid">
+      <div class="card chart-card">
+        <h3 class="card-title">Churn Probability Distribution</h3>
+        <div class="chart-wrap"><canvas id="probDistChart"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h3 class="card-title">ROC Curve</h3>
+        <div class="chart-wrap"><canvas id="rocChart"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h3 class="card-title">Top Feature Importance</h3>
+        <div class="chart-wrap"><canvas id="featureChart"></canvas></div>
+      </div>
+      <div class="card metrics-card">
+        <h3 class="card-title">Model Performance</h3>
+        <div class="metrics-grid" id="metrics-detail-grid">
+          <div class="metric-ring-wrap">
+            <div class="metric-ring" id="ring-accuracy">
+              <canvas id="ringAccCanvas" width="120" height="120"></canvas>
+              <div class="ring-label"><span class="ring-val" id="ring-acc-val">–</span><span class="ring-name">Accuracy</span></div>
+            </div>
+          </div>
+          <div class="metric-ring-wrap">
+            <div class="metric-ring" id="ring-precision">
+              <canvas id="ringPrecCanvas" width="120" height="120"></canvas>
+              <div class="ring-label"><span class="ring-val" id="ring-prec-val">–</span><span class="ring-name">Precision</span></div>
+            </div>
+          </div>
+          <div class="metric-ring-wrap">
+            <div class="metric-ring" id="ring-recall">
+              <canvas id="ringRecCanvas" width="120" height="120"></canvas>
+              <div class="ring-label"><span class="ring-val" id="ring-rec-val">–</span><span class="ring-name">Recall</span></div>
+            </div>
+          </div>
+          <div class="metric-ring-wrap">
+            <div class="metric-ring" id="ring-f1">
+              <canvas id="ringF1Canvas" width="120" height="120"></canvas>
+              <div class="ring-label"><span class="ring-val" id="ring-f1-val">–</span><span class="ring-name">F1 Score</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="confusion-matrix-wrap">
+          <h4 class="cm-title">Confusion Matrix</h4>
+          <div class="confusion-matrix" id="confusion-matrix">
+            <div class="cm-cell cm-header"></div>
+            <div class="cm-cell cm-header">Pred: No Churn</div>
+            <div class="cm-cell cm-header">Pred: Churn</div>
+            <div class="cm-cell cm-header">Actual: No Churn</div>
+            <div class="cm-cell tn" id="cm-tn">–</div>
+            <div class="cm-cell fp" id="cm-fp">–</div>
+            <div class="cm-cell cm-header">Actual: Churn</div>
+            <div class="cm-cell fn" id="cm-fn">–</div>
+            <div class="cm-cell tp" id="cm-tp">–</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── SECTION: CUSTOMERS ── -->
+  <section class="section" id="section-customers">
+    <div class="customers-toolbar">
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input type="text" id="customer-search" placeholder="Search customer ID…" />
+      </div>
+      <div class="risk-filters" id="risk-filters">
+        <button class="risk-filter active" data-risk="All">All</button>
+        <button class="risk-filter high" data-risk="High">High Risk</button>
+        <button class="risk-filter medium" data-risk="Medium">Medium</button>
+        <button class="risk-filter low" data-risk="Low">Low Risk</button>
+      </div>
+      <div class="customer-count" id="customer-count">Showing 0 customers</div>
+    </div>
+
+    <div class="card table-card">
+      <div class="table-wrapper">
+        <table class="customer-table" id="customer-table">
+          <thead>
+            <tr>
+              <th>Customer ID</th>
+              <th>Risk Level</th>
+              <th>Churn Probability</th>
+              <th>Tenure (mo)</th>
+              <th>Monthly Charges</th>
+              <th>Support Tickets</th>
+              <th>Last Login (days)</th>
+              <th>Actual Churn</th>
+            </tr>
+          </thead>
+          <tbody id="customer-tbody">
+            <tr><td colspan="8" class="empty-row">No data loaded. Please train a model first.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="table-pagination" id="table-pagination"></div>
+    </div>
+  </section>
+
+  <!-- ── SECTION: PREDICT SINGLE ── -->
+  <section class="section" id="section-predict">
+    <div class="predict-grid">
+      <div class="card predict-form-card">
+        <h3 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Customer Data Input
+        </h3>
+        <form id="predict-form" class="predict-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Age</label>
+              <input type="number" id="p-age" value="35" min="18" max="80" />
+            </div>
+            <div class="form-group">
+              <label>Gender</label>
+              <select id="p-gender">
+                <option>Male</option><option>Female</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Tenure (months)</label>
+              <input type="number" id="p-tenure" value="12" min="0" />
+            </div>
+            <div class="form-group">
+              <label>Monthly Charges ($)</label>
+              <input type="number" id="p-monthly" value="65" step="0.01" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Total Charges ($)</label>
+              <input type="number" id="p-total" value="780" step="0.01" />
+            </div>
+            <div class="form-group">
+              <label>Num Products</label>
+              <input type="number" id="p-products" value="1" min="1" max="10" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Logins Last 30 Days</label>
+              <input type="number" id="p-logins" value="10" min="0" />
+            </div>
+            <div class="form-group">
+              <label>Support Tickets</label>
+              <input type="number" id="p-tickets" value="2" min="0" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Days Since Last Login</label>
+              <input type="number" id="p-lastlogin" value="5" min="0" />
+            </div>
+            <div class="form-group">
+              <label>Location</label>
+              <input type="text" id="p-location" value="New York" />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Contract Type</label>
+              <select id="p-contract">
+                <option>Month-to-month</option>
+                <option>One year</option>
+                <option>Two year</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Payment Method</label>
+              <select id="p-payment">
+                <option>Credit card</option>
+                <option>Electronic check</option>
+                <option>Mailed check</option>
+                <option>Bank transfer</option>
+              </select>
+            </div>
+          </div>
+          <button type="submit" class="btn-primary btn-full" id="predict-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            Predict Churn
+          </button>
+        </form>
+      </div>
+
+      <div class="card predict-result-card" id="predict-result-card">
+        <h3 class="card-title">Prediction Result</h3>
+        <div class="result-placeholder" id="result-placeholder">
+          <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="url(#rp1)" opacity="0.12"/><path d="M22 32 L28 38 L42 24" stroke="url(#rp2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><defs><linearGradient id="rp1" x1="4" y1="4" x2="60" y2="60"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient><linearGradient id="rp2" x1="4" y1="4" x2="60" y2="60"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs></svg>
+          <p>Fill in the form and click Predict to see the churn probability and risk level.</p>
+        </div>
+
+        <div class="result-content" id="result-content" style="display:none">
+          <div class="prob-gauge-wrap">
+            <div class="prob-gauge" id="prob-gauge">
+              <canvas id="gaugeCanvas" width="220" height="130"></canvas>
+              <div class="gauge-overlay">
+                <span class="gauge-val" id="gauge-val">0%</span>
+                <span class="gauge-sub">Churn Probability</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="risk-badge-large" id="risk-badge-large">
+            <span id="risk-label-large">–</span>
+          </div>
+
+          <div class="recommendations" id="recommendations">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
+              CSM Recommendations
+            </h4>
+            <ul id="recs-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- Loading Overlay -->
+<div class="loading-overlay" id="loading-overlay" style="display:none">
+  <div class="loading-spinner">
+    <div class="spinner-ring"></div>
+    <div class="spinner-ring"></div>
+    <div class="spinner-ring"></div>
+  </div>
+  <p class="loading-text" id="loading-text">Training model…</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
