@@ -4,6 +4,28 @@
 
 const API = `${window.location.origin}/api`;
 
+// ── Firebase Configuration ──────────────────────────────────────────────────
+// REPLACE this placeholder config with your actual Web App credentials from the Firebase Console!
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+
+// Initialize Firebase Web SDK Compat
+let auth = null;
+if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
+  } catch (err) {
+    console.error("Firebase Init Error:", err);
+  }
+}
+
 /* ── State ──────────────────────────────────────────────────── */
 let state = {
   modelTrained   : false,
@@ -16,7 +38,9 @@ let state = {
   pageSize       : 20,
   riskFilter     : 'All',
   searchQuery    : '',
-  charts         : {}
+  charts         : {},
+  user           : null,
+  idToken        : null
 };
 
 /* ── DOM helpers ─────────────────────────────────────────────── */
@@ -140,7 +164,16 @@ async function trainModel() {
   try {
     showProgress(30, 'Training model…');
 
-    const res  = await fetch(`${API}/upload`, { method: 'POST', body: fd });
+    const headers = {};
+    if (state.idToken) {
+      headers['Authorization'] = `Bearer ${state.idToken}`;
+    }
+
+    const res  = await fetch(`${API}/upload`, { 
+      method: 'POST', 
+      headers: headers, 
+      body: fd 
+    });
     const data = await res.json();
 
     if (!res.ok) {
@@ -639,9 +672,14 @@ $('predict-form').addEventListener('submit', async e => {
   };
 
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (state.idToken) {
+      headers['Authorization'] = `Bearer ${state.idToken}`;
+    }
+
     const res  = await fetch(`${API}/predict`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify(payload)
     });
     const data = await res.json();
@@ -770,5 +808,127 @@ function animateCounter(id, from, to, duration, fmt = v => Math.round(v)) {
 // Wire up download sample button to Flask static route
 $('download-sample').href = `${location.origin}/sample_data.csv`;
 
+/* ══════════════════  FIREBASE AUTHENTICATION FLOW  ════════════════ */
+let activeAuthTab = 'login'; // 'login' or 'register'
+
+function initAuthUI() {
+  if (!auth) {
+    // Graceful fallback for local development without Firebase config
+    console.log("[INFO] Bypassing Authentication Overlay (Operating in Dev Mode)");
+    $('auth-overlay').style.display = 'none';
+    return;
+  }
+
+  // Show Auth overlay initially while verifying auth state
+  $('auth-overlay').style.display = 'flex';
+
+  // Toggle Login/Register Tabs
+  $('tab-login').addEventListener('click', () => setAuthTab('login'));
+  $('tab-register').addEventListener('click', () => setAuthTab('register'));
+
+  // Auth form submissions
+  $('auth-form').addEventListener('submit', handleEmailAuth);
+
+  // Google Login button
+  $('google-login-btn').addEventListener('click', handleGoogleAuth);
+
+  // Logout button
+  $('logout-btn').addEventListener('click', handleSignOut);
+
+  // Observe Firebase Auth State changes
+  auth.onAuthStateChanged(async (firebaseUser) => {
+    if (firebaseUser) {
+      state.user = firebaseUser;
+      state.idToken = await firebaseUser.getIdToken();
+
+      // Show user information in Sidebar Footer
+      const initials = firebaseUser.displayName ? 
+                       firebaseUser.displayName.split(' ').map(n => n[0]).join('').slice(0, 2) : 
+                       (firebaseUser.email ? firebaseUser.email.slice(0, 2) : '?');
+
+      $('user-avatar').textContent = initials;
+      $('user-display-name').textContent = firebaseUser.displayName || 'Team Member';
+      $('user-display-email').textContent = firebaseUser.email;
+      $('user-profile-section').style.display = 'flex';
+
+      // Hide auth overlay and unlock app with a premium slide-out animation
+      $('auth-overlay').style.opacity = '0';
+      setTimeout(() => {
+        $('auth-overlay').style.display = 'none';
+      }, 500);
+
+      showToast(`Welcome back, ${firebaseUser.displayName || firebaseUser.email}!`, 'success');
+    } else {
+      state.user = null;
+      state.idToken = null;
+
+      // Reset and hide Sidebar Profile
+      $('user-profile-section').style.display = 'none';
+
+      // Show Login overlay
+      $('auth-overlay').style.display = 'flex';
+      $('auth-overlay').style.opacity = '1';
+    }
+  });
+}
+
+function setAuthTab(tab) {
+  activeAuthTab = tab;
+  $('tab-login').classList.toggle('active', tab === 'login');
+  $('tab-register').classList.toggle('active', tab === 'register');
+
+  if (tab === 'login') {
+    $('auth-subtitle').textContent = 'Sign in to access your Churn Prediction Dashboard';
+    $('submit-btn-text').textContent = 'Sign In';
+  } else {
+    $('auth-subtitle').textContent = 'Create a secure account to deploy and use ChurnSight';
+    $('submit-btn-text').textContent = 'Create Account';
+  }
+}
+
+async function handleEmailAuth(e) {
+  e.preventDefault();
+  const email = $('auth-email').value.trim();
+  const password = $('auth-password').value;
+  const btn = $('auth-submit-btn');
+
+  btn.disabled = true;
+  const originalText = $('submit-btn-text').textContent;
+  $('submit-btn-text').innerHTML = `<span class="spinner-inline"></span> ${activeAuthTab === 'login' ? 'Signing In...' : 'Registering...'}`;
+
+  try {
+    if (activeAuthTab === 'login') {
+      await auth.signInWithEmailAndPassword(email, password);
+    } else {
+      await auth.createUserWithEmailAndPassword(email, password);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+    btn.disabled = false;
+    $('submit-btn-text').textContent = originalText;
+  }
+}
+
+async function handleGoogleAuth() {
+  const provider = new firebase.auth.GoogleAuthProvider();
+  try {
+    await auth.signInWithPopup(provider);
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function handleSignOut() {
+  try {
+    await auth.signOut();
+    showToast('Signed out successfully.', 'success');
+    // Reload to clear app state for safety
+    location.reload();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 /* ══════════════════  INIT  ════════════════════════════════ */
+initAuthUI();
 navigateTo('upload');
