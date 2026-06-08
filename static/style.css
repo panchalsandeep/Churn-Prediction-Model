@@ -50,6 +50,10 @@ body {
 }
 a { color: inherit; text-decoration: none; }
 button { font-family: var(--font); cursor: pointer; border: none; background: none; }
+button:focus-visible, .nav-item:focus-visible, .risk-filter:focus-visible, .page-btn:focus-visible, .algo-pill:focus-visible, .alert-tab:focus-visible, .drawer-close:focus-visible, .form-group input:focus-visible, .form-group select:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.9);
+  outline-offset: 2px;
+}
 input, select, textarea { font-family: var(--font); }
 canvas { display: block; }
 
@@ -857,19 +861,251 @@ canvas { display: block; }
   .metrics-grid   { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 768px) {
-  .sidebar { transform: translateX(-100%); }
+  .sidebar { transform: translateX(-100%); width: 100%; }
   .sidebar.open { transform: translateX(0); }
   .main-content { margin-left: 0; }
   .menu-toggle { display: flex; }
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .section { padding: 18px; }
   .topbar { padding: 0 18px; }
+  .customers-toolbar { flex-direction: column; align-items: stretch; }
+  .customers-toolbar .customer-count { margin-left: 0; }
+  .search-box { width: 100%; }
+  .sidebar-footer { padding: 14px; }
 }
-@media (max-width: 480px) {
+@media (max-width: 600px) {
   .kpi-grid { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
   .risk-filters { gap: 4px; }
   .risk-filter { padding: 6px 10px; font-size: 0.72rem; }
+  .cohort-grid, .cohort-chart-row, .alerts-layout, .health-grid { grid-template-columns: 1fr; }
+  .heatmap-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .heatmap-cell { font-size: 0.68rem; padding: 12px 10px; }
+  .drawer-panel { width: 100%; max-width: 100%; border-radius: 18px 18px 0 0; margin: 0; }
+  .drawer-overlay { align-items: flex-end; padding: 0; }
+  .topbar-right { flex-wrap: wrap; justify-content: flex-end; }
+}
+@media (max-width: 480px) {
+  .heatmap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .customer-table th, .customer-table td { padding: 10px 12px; }
+  .nav-item { font-size: 0.82rem; }
+  .search-box svg { width: 14px; height: 14px; }
+}
+
+.section-actions {
+  margin: 18px 0 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.health-header,
+.alerts-toolbar,
+.cohort-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 22px;
+  flex-wrap: wrap;
+}
+.health-summary,
+.health-actions {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.health-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 120px;
+  padding: 18px 20px;
+  border-radius: var(--radius);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.health-kpi-label { color: var(--text-2); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+.health-kpi-value { font-size: 1.8rem; font-weight: 800; color: var(--text-1); }
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+.health-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius);
+  padding: 20px;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.health-card.empty-card {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 0.95rem;
+}
+.health-card h4 { font-size: 1rem; font-weight: 700; color: var(--text-1); }
+.health-card .health-score { font-size: 2.5rem; font-weight: 800; color: var(--text-1); }
+.health-card .health-tier { display: inline-flex; padding: 4px 12px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.4px; }
+.health-tier.High { background: rgba(248,113,113,0.12); color: var(--red); }
+.health-tier.Medium { background: rgba(251,146,60,0.12); color: var(--orange); }
+.health-tier.Low { background: rgba(52,211,153,0.12); color: var(--green); }
+.health-component { display: flex; justify-content: space-between; gap: 10px; align-items: center; font-size: 0.78rem; color: var(--text-2); }
+.health-bar { height: 8px; border-radius: 99px; background: rgba(255,255,255,0.07); overflow: hidden; width: 100%; }
+.health-bar-fill { height: 100%; border-radius: 99px; background: linear-gradient(90deg, #60a5fa, #34d399); }
+.health-note { font-size: 0.8rem; color: var(--text-2); line-height: 1.6; }
+.health-actions .risk-filters { gap: 8px; }
+
+.cohort-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+.cohort-selector { display: flex; flex-direction: column; gap: 8px; }
+.cohort-selector label { color: var(--text-2); font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+.cohort-selector select { width: 220px; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: rgba(255,255,255,0.05); color: var(--text-1); }
+.cohort-summary { color: var(--text-2); font-size: 0.9rem; }
+.heatmap-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.heatmap-cell { padding: 16px 10px; border-radius: 12px; text-align: center; font-size: 0.75rem; font-weight: 700; color: #fff; line-height: 1.3; }
+.heatmap-empty { padding: 100px 16px; text-align: center; color: var(--text-2); }
+
+.cohort-chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+.alerts-layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
+.alerts-list, .playbooks-list { display: grid; gap: 14px; }
+.alert-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.alert-tab {
+  padding: 10px 16px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-2);
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  transition: all 0.2s ease;
+}
+.alert-tab:hover {
+  color: var(--text-1);
+  background: rgba(255,255,255,0.08);
+  border-color: var(--border-hv);
+}
+.alert-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.15));
+  border-color: rgba(129,140,248,0.35);
+}
+.alert-summary,
+.cohort-summary {
+  color: var(--text-2);
+  font-size: 0.92rem;
+}
+.alert-card {
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.alert-card .alert-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.alert-card .alert-title { font-size: 1rem; font-weight: 700; color: var(--text-1); }
+.alert-card .alert-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.alert-badge { padding: 4px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; color: #fff; }
+.alert-badge.High { background: rgba(248,113,113,0.95); }
+.alert-badge.Medium { background: rgba(251,146,60,0.95); }
+.alert-badge.Low { background: rgba(52,211,153,0.95); }
+.alert-card p { color: var(--text-2); font-size: 0.85rem; line-height: 1.5; }
+.alert-card .alert-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.playbook-card {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.playbook-card h4 { font-size: 1rem; font-weight: 700; color: var(--text-1); }
+.playbook-card .playbook-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.playbook-card .playbook-steps { display: grid; gap: 8px; }
+.playbook-card .playbook-step { font-size: 0.82rem; color: var(--text-2); background: rgba(255,255,255,0.03); padding: 10px 12px; border-radius: 10px; }
+.playbook-card .playbook-footer { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  z-index: 9500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+.drawer-panel {
+  width: min(520px, 100%);
+  background: rgba(15,19,34,0.96);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--radius);
+  padding: 26px;
+  position: relative;
+}
+.drawer-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.08);
+  color: var(--text-1);
+  font-size: 1.4rem;
+  display: grid;
+  place-items: center;
+}
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.drawer-header h3 { font-size: 1.2rem; font-weight: 800; color: var(--text-1); }
+.drawer-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.drawer-content { display: grid; gap: 12px; }
+.drawer-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.03);
+  color: var(--text-2);
+}
+.drawer-row strong { color: var(--text-1); }
+.drawer-row.drawer-note { grid-template-columns: 1fr; }
+.drawer-note p { margin-top: 6px; color: var(--text-2); line-height: 1.6; }
+
+@media (max-width: 960px) {
+  .health-grid, .cohort-chart-row, .alerts-layout { grid-template-columns: 1fr; }
+  .cohort-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .health-grid { grid-template-columns: 1fr; }
+  .section-actions { justify-content: center; }
+  .health-header, .alerts-toolbar, .cohort-toolbar { flex-direction: column; align-items: stretch; }
 }
 
 /* ══════════════════════  FIREBASE AUTH OVERLAY  ══════════════════════════ */
