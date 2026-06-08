@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 import pandas as pd
 import numpy as np
@@ -28,6 +28,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 static_dir = os.path.join(BASE_DIR, 'static')
 
 app = Flask(__name__, static_folder=static_dir, static_url_path='')
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 CORS(app)
 
 # Initialize Firebase Admin SDK
@@ -41,6 +42,8 @@ except Exception as e:
     print(f"[WARNING] Firebase Admin SDK initialization failed: {e}. Running in Dev Mode (Bypass Auth).")
 
 ADMIN_EMAILS = [email.strip().lower() for email in os.environ.get('ADMIN_EMAILS', '').split(',') if email.strip()]
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Admin@2026!')
 ADMIN_SETTINGS_FILE = os.path.join(BASE_DIR, 'admin_settings.json')
 DEFAULT_ADMIN_SETTINGS = {
     'risk_thresholds': {
@@ -110,9 +113,15 @@ def is_admin_token(decoded_token):
     return decoded_token.get('admin') is True
 
 
+def is_admin_session():
+    return session.get('admin_authenticated') is True
+
 def require_admin(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if is_admin_session():
+            return f(*args, **kwargs)
+
         has_firebase_config = os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         if not firebase_initialized or not has_firebase_config:
             return f(*args, **kwargs)
@@ -490,13 +499,51 @@ def get_customers():
 @app.route('/api/admin/whoami', methods=['GET'])
 @require_firebase_auth
 def admin_whoami():
+    if is_admin_session():
+        return jsonify({'is_admin': True, 'email': None, 'uid': None, 'mode': 'session'})
+
     if not firebase_initialized or not (os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')):
         return jsonify({'is_admin': False, 'email': None, 'message': 'Auth not fully configured in this environment.'})
     return jsonify({
         'is_admin': is_admin_token(request.user),
         'email': request.user.get('email'),
-        'uid': request.user.get('uid')
+        'uid': request.user.get('uid'),
+        'mode': 'firebase'
     })
+
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    if not ADMIN_PASSWORD:
+        return jsonify({'error': 'Admin password not configured. Set ADMIN_PASSWORD in environment.'}), 500
+
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+
+    if username.lower() != ADMIN_USERNAME.lower() or password != ADMIN_PASSWORD:
+        return jsonify({'error': 'Invalid admin credentials'}), 401
+
+    session['admin_authenticated'] = True
+    return jsonify({'status': 'success', 'message': 'Admin session active.'})
+
+
+@app.route('/api/admin/logout', methods=['POST'])
+def admin_logout():
+    session.pop('admin_authenticated', None)
+    return jsonify({'status': 'success', 'message': 'Logged out.'})
+
+
+@app.route('/api/admin/session', methods=['GET'])
+def admin_session():
+    return jsonify({'is_admin': is_admin_session()})
+
+
+@app.route('/admin', methods=['GET'])
+def admin_page():
+    if not ADMIN_PASSWORD:
+        return jsonify({'error': 'Admin login is not configured. Please set ADMIN_PASSWORD.'}), 500
+    return send_from_directory(static_dir, 'admin.html')
 
 
 @app.route('/api/admin/users', methods=['GET'])

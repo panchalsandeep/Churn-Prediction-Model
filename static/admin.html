@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Login | ChurnSight</title>
+  <style>
+    body { margin:0; font-family:system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background:#12121d; color:#f8fafc; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .card { width: min(420px, calc(100vw - 32px)); background:#1f2937; border:1px solid #374151; border-radius:20px; box-shadow:0 30px 60px rgba(15,23,42,.35); padding:32px; }
+    h1 { margin:0 0 14px; font-size:1.7rem; }
+    p { margin:0 0 24px; color:#d1d5db; }
+    label { display:block; margin-bottom:8px; color:#e2e8f0; font-size:.95rem; }
+    input { width:100%; border:1px solid #4b5563; border-radius:12px; padding:12px 14px; margin-bottom:18px; background:#111827; color:#f8fafc; }
+    button { width:100%; border:none; border-radius:12px; padding:14px; background:#6366f1; color:white; font-weight:700; cursor:pointer; transition:.2s ease; }
+    button:hover { background:#4f46e5; }
+    .note { margin-top:18px; color:#9ca3af; font-size:.92rem; }
+    .toast { margin-top:12px; padding:12px 14px; border-radius:12px; background:#111827; color:#f8fafc; border:1px solid #374151; }
+    a { color:#93c5fd; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Admin login</h1>
+    <p>Use the admin credentials configured on the server to open the admin session.</p>
+
+    <form id="admin-login-form">
+      <label for="username">Username</label>
+      <input id="username" type="text" autocomplete="username" required value="admin" />
+
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" required />
+
+      <button type="submit">Sign in as admin</button>
+    </form>
+
+    <div class="note">If you don’t see admin access after signing in, reload the main dashboard and try again.</div>
+    <div class="note">Return to the main app: <a href="/">ChurnSight Home</a></div>
+    <div id="message" class="toast" style="display:none;"></div>
+  </div>
+
+  <script>
+    const form = document.getElementById('admin-login-form');
+    const message = document.getElementById('message');
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      message.style.display = 'none';
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const body = await res.json();
+        if (!res.ok) {
+          message.textContent = body.error || 'Login failed';
+          message.style.display = 'block';
+          return;
+        }
+        message.textContent = body.message || 'Signed in successfully.';
+        message.style.display = 'block';
+        message.style.borderColor = '#10b981';
+        message.style.background = '#064e3b';
+        setTimeout(() => { window.location.href = '/'; }, 1200);
+      } catch (err) {
+        message.textContent = err.message || 'Connection error';
+        message.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

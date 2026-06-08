@@ -884,10 +884,23 @@ function initAuthUI() {
     } else {
       state.user = null;
       state.idToken = null;
-      state.admin.isAdmin = false;
       state.admin.users = [];
       state.admin.settings = null;
       state.admin.modelStatus = null;
+
+      try {
+        const res = await fetch(`${API}/admin/session`, { method: 'GET' });
+        const body = await res.json();
+        state.admin.isAdmin = body.is_admin === true;
+      } catch (err) {
+        state.admin.isAdmin = false;
+      }
+
+      if (state.admin.isAdmin) {
+        $('user-profile-section').style.display = 'none';
+        updateAdminNavigation();
+        return;
+      }
 
       // Reset and hide Sidebar Profile
       $('user-profile-section').style.display = 'none';
@@ -947,20 +960,29 @@ async function handleGoogleAuth() {
 }
 
 async function refreshAdminAccess() {
-  if (!state.user) {
-    state.admin.isAdmin = false;
-    updateAdminNavigation();
-    return;
+  if (state.user) {
+    try {
+      const token = await state.user.getIdToken(true);
+      const res = await fetch(`${API}/admin/whoami`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const body = await res.json();
+      state.admin.isAdmin = body.is_admin === true;
+      if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
+        loadAdminPanel();
+      }
+      updateAdminNavigation();
+      return;
+    } catch (err) {
+      // Continue to session-based fallback below
+    }
   }
 
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/whoami`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
+    const res = await fetch(`${API}/admin/session`, { method: 'GET' });
     const body = await res.json();
     state.admin.isAdmin = body.is_admin === true;
     if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
