@@ -40,6 +40,45 @@ try:
 except Exception as e:
     print(f"[WARNING] Firebase Admin SDK initialization failed: {e}. Running in Dev Mode (Bypass Auth).")
 
+ADMIN_EMAILS = [email.strip().lower() for email in os.environ.get('ADMIN_EMAILS', '').split(',') if email.strip()]
+ADMIN_SETTINGS_FILE = os.path.join(BASE_DIR, 'admin_settings.json')
+DEFAULT_ADMIN_SETTINGS = {
+    'risk_thresholds': {
+        'high': 0.7,
+        'medium': 0.4
+    },
+    'alert_rules': [
+        {
+            'id': 'reengagement',
+            'label': 'Re-engagement email trigger',
+            'enabled': True,
+            'last_login_days': 21
+        },
+        {
+            'id': 'support_escalation',
+            'label': 'Support escalation threshold',
+            'enabled': True,
+            'support_tickets': 4
+        }
+    ]
+}
+ADMIN_SETTINGS = DEFAULT_ADMIN_SETTINGS.copy()
+if os.path.exists(ADMIN_SETTINGS_FILE):
+    try:
+        with open(ADMIN_SETTINGS_FILE, 'r') as f:
+            ADMIN_SETTINGS = json.load(f)
+    except Exception:
+        print('[WARNING] Could not load admin_settings.json, using defaults.')
+
+
+def save_admin_settings():
+    try:
+        with open(ADMIN_SETTINGS_FILE, 'w') as f:
+            json.dump(ADMIN_SETTINGS, f, indent=2)
+    except Exception as e:
+        print('Failed to save admin settings:', e)
+
+
 def require_firebase_auth(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -60,6 +99,27 @@ def require_firebase_auth(f):
         except Exception as e:
             return jsonify({'error': f'Unauthorized: Token verification failed: {str(e)}'}), 401
             
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def is_admin_token(decoded_token):
+    email = decoded_token.get('email', '').lower()
+    if email in ADMIN_EMAILS:
+        return True
+    return decoded_token.get('admin') is True
+
+
+def require_admin(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        has_firebase_config = os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+        if not firebase_initialized or not has_firebase_config:
+            return f(*args, **kwargs)
+        if not hasattr(request, 'user') or request.user is None:
+            return jsonify({'error': 'Unauthorized: Admin access required'}), 401
+        if not is_admin_token(request.user):
+            return jsonify({'error': 'Forbidden: Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated_function
 
@@ -425,6 +485,125 @@ def get_customers():
     paged = data[start:start + limit]
 
     return jsonify({'customers': paged, 'total': total, 'page': page, 'limit': limit})
+
+
+@app.route('/api/admin/whoami', methods=['GET'])
+@require_firebase_auth
+def admin_whoami():
+    if not firebase_initialized or not (os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')):
+        return jsonify({'is_admin': False, 'email': None, 'message': 'Auth not fully configured in this environment.'})
+    return jsonify({
+        'is_admin': is_admin_token(request.user),
+        'email': request.user.get('email'),
+        'uid': request.user.get('uid')
+    })
+
+
+@app.route('/api/admin/users', methods=['GET'])
+@require_admin
+def admin_list_users():
+    if not firebase_initialized:
+        return jsonify({'error': 'Firebase admin SDK unavailable.'}), 501
+
+    users = []
+    for user in auth.list_users().iterate_all():
+        provider_ids = [p.provider_id for p in user.provider_data] if user.provider_data else []
+        users.append({
+            'uid': user.uid,
+            'email': user.email,
+            'display_name': user.display_name,
+            'disabled': user.disabled,
+            'provider_ids': provider_ids,
+            'created_at': user.user_metadata.creation_timestamp,
+            'last_sign_in_at': user.user_metadata.last_sign_in_timestamp
+        })
+    return jsonify({'users': users})
+
+
+@app.route('/api/admin/users/<uid>', methods=['PATCH'])
+@require_admin
+def admin_update_user(uid):
+    if not firebase_initialized:
+        return jsonify({'error': 'Firebase admin SDK unavailable.'}), 501
+
+    data = request.get_json() or {}
+    action = data.get('action')
+    if action == 'disable':
+        auth.update_user(uid, disabled=True)
+    elif action == 'enable':
+        auth.update_user(uid, disabled=False)
+    elif action == 'delete':
+        auth.delete_user(uid)
+    else:
+        return jsonify({'error': 'Invalid action'}), 400
+
+    return jsonify({'status': 'success', 'action': action})
+
+
+@app.route('/api/admin/settings', methods=['GET', 'POST'])
+@require_admin
+def admin_settings():
+    if request.method == 'GET':
+        return jsonify(ADMIN_SETTINGS)
+
+    data = request.get_json() or {}
+    thresholds = data.get('risk_thresholds')
+    if thresholds:
+        ADMIN_SETTINGS['risk_thresholds'].update({
+            k: float(v) for k, v in thresholds.items() if k in ADMIN_SETTINGS['risk_thresholds']
+        })
+
+    alert_rules = data.get('alert_rules')
+    if isinstance(alert_rules, list):
+        for rule in alert_rules:
+            for stored_rule in ADMIN_SETTINGS['alert_rules']:
+                if stored_rule['id'] == rule.get('id'):
+                    stored_rule.update({
+                        'enabled': bool(rule.get('enabled', stored_rule['enabled'])),
+                        **{k: v for k, v in rule.items() if k not in ['id', 'label', 'enabled']}
+                    })
+    save_admin_settings()
+    return jsonify(ADMIN_SETTINGS)
+
+
+@app.route('/api/admin/model', methods=['GET'])
+@require_admin
+def admin_model_status():
+    has_model = trained_model is not None or os.path.exists(MODEL_PATH)
+    return jsonify({
+        'trained': training_results is not None,
+        'has_model': has_model,
+        'customer_count': len(customer_predictions) if customer_predictions else 0,
+        'algorithm': training_results['summary']['algorithm'] if training_results else None
+    })
+
+
+@app.route('/api/admin/model/actions', methods=['POST'])
+@require_admin
+def admin_model_actions():
+    global trained_model, training_results, customer_predictions
+    data = request.get_json() or {}
+    action = data.get('action')
+
+    if action == 'reset':
+        trained_model = None
+        training_results = None
+        customer_predictions = None
+        try:
+            if os.path.exists(MODEL_PATH):
+                os.remove(MODEL_PATH)
+        except Exception:
+            pass
+        return jsonify({'status': 'reset'})
+
+    if action == 'reload_sample':
+        trained_model = None
+        model = get_fallback_model()
+        if model is None:
+            return jsonify({'error': 'Could not load sample model.'}), 500
+        return jsonify({'status': 'sample_loaded'})
+
+    return jsonify({'error': 'Invalid action.'}), 400
 
 
 if __name__ == '__main__':

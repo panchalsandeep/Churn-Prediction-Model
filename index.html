@@ -51,6 +51,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
       Customers
     </a>
+    <a class="nav-item admin-only" data-section="admin" href="#" id="nav-admin" style="display:none" aria-label="Admin console">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4"/><path d="M18.36 5.64l-2.83 2.83"/><path d="M21 12h-4"/><path d="M18.36 18.36l-2.83-2.83"/><path d="M12 21v-4"/><path d="M5.64 18.36l2.83-2.83"/><path d="M3 12h4"/><path d="M5.64 5.64l2.83 2.83"/></svg>
+      Admin
+    </a>
     <a class="nav-item" data-section="predict" href="#" id="nav-predict" aria-label="Predict single customer churn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       Predict Single
@@ -637,6 +641,88 @@
     </button>
   </div>
 </div>
+
+  <section class="section" id="section-admin">
+    <div class="admin-grid">
+      <div class="card admin-card">
+        <div class="card-title-row">
+          <h3>Admin Console</h3>
+          <span class="badge admin-badge">Admin only</span>
+        </div>
+        <p class="admin-intro">Manage users, model lifecycle, and churn system settings from one place.</p>
+        <div class="admin-stats">
+          <div>
+            <span id="admin-user-count">—</span>
+            <p>Active users</p>
+          </div>
+          <div>
+            <span id="admin-customer-count">—</span>
+            <p>Customer records</p>
+          </div>
+          <div>
+            <span id="admin-model-status">—</span>
+            <p>Model state</p>
+          </div>
+        </div>
+        <div class="admin-actions">
+          <button class="btn-secondary btn-full" id="admin-refresh-btn">Refresh data</button>
+          <button class="btn-primary btn-full" id="admin-reset-model-btn">Reset model session</button>
+          <button class="btn-secondary btn-full" id="admin-load-sample-btn">Load sample model</button>
+        </div>
+      </div>
+
+      <div class="card table-card admin-card">
+        <div class="table-card-header">
+          <div>
+            <h3>User Management</h3>
+            <p>View and manage registered users in Firebase Auth.</p>
+          </div>
+          <div>
+            <input id="admin-user-search" class="input-search" type="search" placeholder="Search users" aria-label="Search users" />
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="customer-table" id="admin-user-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Providers</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-user-list">
+              <tr><td class="empty-row" colspan="5">Loading users…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card admin-card">
+        <h3>Churn System Settings</h3>
+        <form id="admin-settings-form" class="admin-settings-form">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="admin-threshold-high">High risk threshold</label>
+              <input type="number" step="0.01" min="0" max="1" id="admin-threshold-high" />
+            </div>
+            <div class="form-group">
+              <label for="admin-threshold-medium">Medium risk threshold</label>
+              <input type="number" step="0.01" min="0" max="1" id="admin-threshold-medium" />
+            </div>
+          </div>
+          <div class="form-group checkbox-group">
+            <label><input type="checkbox" id="admin-alert-reengage" /> Enable re-engagement trigger</label>
+          </div>
+          <div class="form-group checkbox-group">
+            <label><input type="checkbox" id="admin-alert-support" /> Enable support escalation trigger</label>
+          </div>
+          <button class="btn-primary btn-full" id="admin-save-settings-btn" type="button">Save settings</button>
+        </form>
+      </div>
+    </div>
+  </section>
 
 <script type="module" src="src/main.js"></script>
 </body>

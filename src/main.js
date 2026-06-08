@@ -54,6 +54,12 @@ let state = {
   charts            : {},
   user              : null,
   idToken           : null,
+  admin             : {
+    isAdmin: false,
+    users: [],
+    settings: null,
+    modelStatus: null
+  }
 };
 
 /* ── DOM helpers ─────────────────────────────────────────────── */
@@ -61,7 +67,7 @@ const $  = id => document.getElementById(id);
 const qs = s  => document.querySelector(s);
 
 /* ══════════════════  NAVIGATION  ═════════════════════════════ */
-const sections = ['upload', 'overview', 'health', 'cohorts', 'alerts', 'analytics', 'customers', 'predict'];
+const sections = ['upload', 'overview', 'health', 'cohorts', 'alerts', 'analytics', 'customers', 'predict', 'admin'];
 const titles   = {
   upload   : 'Upload & Train Model',
   overview : 'Overview Dashboard',
@@ -71,6 +77,7 @@ const titles   = {
   analytics: 'Analytics & Model Performance',
   customers: 'Customer Risk List',
   predict  : 'Predict Single Customer',
+  admin    : 'Admin Console'
 };
 
 function navigateTo(section) {
@@ -86,6 +93,10 @@ function navigateTo(section) {
   });
   $('page-title').textContent = titles[section];
 
+  if (section === 'admin') {
+    loadAdminPanel();
+  }
+
   if (window.innerWidth <= 768) {
     document.querySelector('.sidebar').classList.remove('open');
   }
@@ -95,13 +106,24 @@ document.querySelectorAll('.nav-item').forEach(el => {
   el.addEventListener('click', e => {
     e.preventDefault();
     const sec = el.dataset.section;
-    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict') {
+    if (sec === 'admin' && !state.admin.isAdmin) {
+      showToast('Admin access is restricted to administrators only.', 'error');
+      return;
+    }
+    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin') {
       showToast('Please upload data and train a model first.', 'error');
       return;
     }
     navigateTo(sec);
   });
 });
+
+function updateAdminNavigation() {
+  const adminNav = $('nav-admin');
+  if (!adminNav) return;
+  adminNav.style.display = state.admin.isAdmin ? 'flex' : 'none';
+}
+
 
 $('menu-toggle').addEventListener('click', () => {
   document.querySelector('.sidebar').classList.toggle('open');
@@ -1090,11 +1112,18 @@ function initAuthUI() {
       setTimeout(() => { $('auth-overlay').style.display = 'none'; }, 500);
 
       showToast(`Welcome back, ${firebaseUser.displayName || firebaseUser.email}!`, 'success');
+      await refreshAdminAccess();
+      updateAdminNavigation();
       await loadPersistedResults();
     } else {
       state.user    = null;
       state.idToken = null;
+      state.admin.isAdmin = false;
+      state.admin.users = [];
+      state.admin.settings = null;
+      state.admin.modelStatus = null;
       $('user-profile-section').style.display = 'none';
+      updateAdminNavigation();
       $('auth-overlay').style.display   = 'flex';
       $('auth-overlay').style.opacity   = '1';
       await loadPersistedResults();
@@ -1148,6 +1177,212 @@ async function handleGoogleAuth() {
   }
 }
 
+async function refreshAdminAccess() {
+  if (!state.user) {
+    state.admin.isAdmin = false;
+    updateAdminNavigation();
+    return;
+  }
+
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/whoami`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await res.json();
+    state.admin.isAdmin = body.is_admin === true;
+    if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
+      await loadAdminPanel();
+    }
+  } catch (err) {
+    state.admin.isAdmin = false;
+  }
+
+  updateAdminNavigation();
+}
+
+async function loadAdminPanel() {
+  if (!state.admin.isAdmin) return;
+  await Promise.all([
+    loadAdminUsers(),
+    loadAdminSettings(),
+    loadAdminModelStatus()
+  ]);
+}
+
+async function loadAdminUsers() {
+  const list = $('admin-user-list');
+  list.innerHTML = '<tr><td class="empty-row" colspan="5">Loading users…</td></tr>';
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/users`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      list.innerHTML = `<tr><td class="empty-row" colspan="5">${body.error || 'Unable to fetch users'}</td></tr>`;
+      return;
+    }
+    state.admin.users = body.users || [];
+    renderAdminUsers();
+  } catch (err) {
+    list.innerHTML = `<tr><td class="empty-row" colspan="5">${err.message}</td></tr>`;
+  }
+}
+
+function renderAdminUsers() {
+  const list = $('admin-user-list');
+  const query = $('admin-user-search')?.value?.toLowerCase() || '';
+  const users = state.admin.users.filter(u => {
+    return !query || [u.email, u.display_name, u.uid].some(value => value && value.toLowerCase().includes(query));
+  });
+
+  if (!users.length) {
+    list.innerHTML = '<tr><td class="empty-row" colspan="5">No users found.</td></tr>';
+    return;
+  }
+
+  list.innerHTML = users.map(user => {
+    const providers = user.provider_ids.length ? user.provider_ids.join(', ') : 'Email';
+    const status = user.disabled ? 'Disabled' : 'Active';
+    const actionButton = user.disabled ? 'Enable' : 'Disable';
+    const action = user.disabled ? 'enable' : 'disable';
+    return `
+      <tr>
+        <td>${user.display_name || '—'}</td>
+        <td>${user.email || '—'}</td>
+        <td>${providers}</td>
+        <td>${status}</td>
+        <td class="table-actions">
+          <button class="btn-secondary btn-small" data-action="${action}" data-uid="${user.uid}">${actionButton}</button>
+          <button class="btn-danger btn-small" data-action="delete" data-uid="${user.uid}">Delete</button>
+        </td>
+      </tr>`;
+  }).join('');
+}
+
+async function modifyAdminUser(uid, action) {
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/users/${uid}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ action })
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      showToast(body.error || 'Unable to update user.', 'error');
+      return;
+    }
+    showToast(`User ${action}d successfully.`, 'success');
+    await loadAdminUsers();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function loadAdminSettings() {
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/settings`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      showToast(body.error || 'Unable to load settings.', 'error');
+      return;
+    }
+    state.admin.settings = body;
+    $('admin-threshold-high').value = body.risk_thresholds.high;
+    $('admin-threshold-medium').value = body.risk_thresholds.medium;
+    $('admin-alert-reengage').checked = body.alert_rules.find(r => r.id === 'reengagement')?.enabled ?? false;
+    $('admin-alert-support').checked = body.alert_rules.find(r => r.id === 'support_escalation')?.enabled ?? false;
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function saveAdminSettings() {
+  const payload = {
+    risk_thresholds: {
+      high: parseFloat($('admin-threshold-high').value) || 0.7,
+      medium: parseFloat($('admin-threshold-medium').value) || 0.4
+    },
+    alert_rules: [
+      { id: 'reengagement', enabled: $('admin-alert-reengage').checked },
+      { id: 'support_escalation', enabled: $('admin-alert-support').checked }
+    ]
+  };
+
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/settings`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      showToast(body.error || 'Unable to save settings.', 'error');
+      return;
+    }
+    state.admin.settings = body;
+    showToast('Admin settings saved.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function loadAdminModelStatus() {
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/model`, {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      showToast(body.error || 'Unable to load model status.', 'error');
+      return;
+    }
+    state.admin.modelStatus = body;
+    $('admin-user-count').textContent = state.admin.users.length;
+    $('admin-customer-count').textContent = body.customer_count ?? '—';
+    $('admin-model-status').textContent = body.trained ? 'Trained' : (body.has_model ? 'Loaded' : 'None');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function adminModelAction(action) {
+  try {
+    const token = await state.user.getIdToken(true);
+    const res = await fetch(`${API}/admin/model/actions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ action })
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      showToast(body.error || 'Unable to perform model action.', 'error');
+      return;
+    }
+    showToast(`Model action ${action} completed.`, 'success');
+    await loadAdminModelStatus();
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
 async function handleSignOut() {
   try {
     await signOut(auth);
@@ -1157,6 +1392,22 @@ async function handleSignOut() {
     showToast(err.message, 'error');
   }
 }
+
+/* ══════════════════  ADMIN EVENT BINDINGS ═══════════════════════ */
+$('admin-refresh-btn')?.addEventListener('click', loadAdminPanel);
+$('admin-reset-model-btn')?.addEventListener('click', () => adminModelAction('reset'));
+$('admin-load-sample-btn')?.addEventListener('click', () => adminModelAction('reload_sample'));
+$('admin-save-settings-btn')?.addEventListener('click', saveAdminSettings);
+$('admin-user-search')?.addEventListener('input', renderAdminUsers);
+$('admin-user-table')?.addEventListener('click', e => {
+  const button = e.target.closest('button[data-uid]');
+  if (!button) return;
+  const uid = button.dataset.uid;
+  const action = button.dataset.action;
+  if (uid && action) {
+    modifyAdminUser(uid, action);
+  }
+});
 
 /* ══════════════════  INIT  ════════════════════════════════ */
 $('download-sample').href = `${location.origin}/sample_data.csv`;

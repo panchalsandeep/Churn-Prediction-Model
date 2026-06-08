@@ -630,7 +630,24 @@ canvas { display: block; }
 .customer-count { margin-left: auto; font-size: 0.8rem; color: var(--text-2); }
 
 .table-card { padding: 0; overflow: hidden; }
-.table-wrapper { overflow-x: auto; }
+.admin-grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 22px; }
+.admin-card { padding: 26px; }
+.card-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.admin-badge { padding: 6px 12px; border-radius: 999px; font-size: 0.75rem; font-weight: 700; background: rgba(99,102,241,0.15); color: var(--purple); }
+.admin-intro { color: var(--text-2); margin-bottom: 18px; }
+.admin-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 20px; }
+.admin-stats div { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 18px; padding: 18px; }
+.admin-stats span { display: block; font-size: 1.8rem; font-weight: 700; color: var(--text-1); margin-bottom: 6px; }
+.admin-stats p { color: var(--text-2); font-size: 0.9rem; }
+.admin-actions { display: grid; gap: 10px; margin-top: 10px; }
+.table-card-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; }
+.table-card-header h3 { margin: 0; }
+.input-search { width: 260px; max-width: 100%; padding: 10px 14px; border-radius: 14px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--text-1); }
+.table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn-small { padding: 8px 12px; font-size: 0.8rem; }
+.checkbox-group { margin: 12px 0; }
+.checkbox-group label { display: inline-flex; align-items: center; gap: 10px; font-size: 0.95rem; color: var(--text-1); }
+.admin-settings-form .form-row { gap: 16px; }
 .customer-table { width: 100%; border-collapse: collapse; }
 .customer-table thead tr {
   border-bottom: 1px solid var(--border);
