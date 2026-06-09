@@ -395,6 +395,38 @@ canvas { display: block; }
 .btn-secondary:hover { background: rgba(99,102,241,0.08); border-color: var(--purple); }
 .btn-secondary svg { width: 16px; height: 16px; }
 
+
+.btn-danger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #fff;
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  transition: all 0.2s ease;
+  margin-top: 12px;
+}
+.btn-danger:hover {
+  background: rgba(239, 68, 68, 0.35);
+  border-color: rgba(239, 68, 68, 0.8);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+}
+
+.alert-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  align-items: center;
+}
+.alert-actions button {
+  margin-top: 0 !important;
+}
+
 /* Progress */
 .progress-wrap { margin-top: 16px; }
 .progress-bar-bg {
@@ -1131,13 +1163,19 @@ canvas { display: block; }
   font-size: 0.92rem;
 }
 .alert-card {
-  background: rgba(255,255,255,0.05);
+  background: rgba(255,255,255,0.04);
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: var(--radius);
   padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease;
+}
+.alert-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.12) !important;
 }
 .alert-card .alert-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .alert-card .alert-title { font-size: 1rem; font-weight: 700; color: var(--text-1); }
