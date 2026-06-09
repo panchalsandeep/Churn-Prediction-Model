@@ -2029,28 +2029,11 @@ function buildAlertsView() {
 
   // Render subheader description
   const total = (alertsState.alerts[tab] || []).length;
-  if (tab === 'Playbooks') {
-    summaryEl.textContent = 'Review automated playbooks for churn prevention and growth.';
-  } else {
-    summaryEl.textContent = `Showing ${total} ${tab.toLowerCase()} alert${total === 1 ? '' : 's'} based on dynamic customer metrics.`;
-  }
+  summaryEl.textContent = `Showing ${total} ${tab.toLowerCase()} alert${total === 1 ? '' : 's'} based on dynamic customer metrics.`;
 
   // Render based on current active tab
-  if (tab === 'Playbooks') {
-    // Playbooks tab selected
-    alertListEl.innerHTML = `
-      <div class="empty-card" style="text-align: center; padding: 40px 20px;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px; color: var(--text-3); margin-bottom: 12px;"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
-        <h4 style="color: var(--text-1); font-size: 1rem; margin-bottom: 6px;">Manage Playbooks</h4>
-        <p style="color: var(--text-3); font-size: 0.85rem; max-width: 320px; margin: 0 auto 16px;">Create, edit, or configure automated triggers and intervention tasks.</p>
-        <button class="btn-primary" onclick="openPlaybookBuilder()" style="margin: 0 auto;">+ Create New Playbook</button>
-      </div>`;
-    renderPlaybooksList(playbookListEl, true);
-  } else {
-    // Alert tab selected
-    renderAlertsList(alertListEl, alertsState.alerts[tab], tab);
-    renderPlaybooksList(playbookListEl, false);
-  }
+  renderAlertsList(alertListEl, alertsState.alerts[tab], tab);
+  renderPlaybooksList(playbookListEl, false);
 }
 
 /* ── Render Alerts ──────────────────────────────────────────── */
@@ -2120,9 +2103,7 @@ function renderPlaybooksList(container, fullMode) {
     return;
   }
 
-  const headingHtml = fullMode
-    ? '<h3 class="card-title" style="margin-bottom: 16px;">Automated Prevention Playbooks</h3>'
-    : '<h3 class="card-title" style="margin-bottom: 16px;">Available Interventions</h3>';
+  const headingHtml = '<h3 class="card-title" style="margin-bottom: 16px;">Automated Prevention Playbooks</h3>';
 
   const cards = alertsState.playbooks.map(pb => {
     return `
