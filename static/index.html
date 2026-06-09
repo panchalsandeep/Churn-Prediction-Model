@@ -50,6 +50,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       Cohort Analysis
     </a>
+    <a class="nav-item" data-section="alerts" href="#" id="nav-alerts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      Alerts & Playbooks
+    </a>
     <a class="nav-item admin-only" data-section="admin" href="#" id="nav-admin" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4"/><path d="M18.36 5.64l-2.83 2.83"/><path d="M21 12h-4"/><path d="M18.36 18.36l-2.83-2.83"/><path d="M12 21v-4"/><path d="M5.64 18.36l2.83-2.83"/><path d="M3 12h4"/><path d="M5.64 5.64l2.83 2.83"/></svg>
       Admin
@@ -510,6 +514,54 @@
 
   </section>
 
+  <!-- ── SECTION: ALERTS & PLAYBOOKS ── -->
+  <section class="section" id="section-alerts">
+    
+    <!-- Toolbar -->
+    <div class="cohort-toolbar" style="margin-bottom: 24px;">
+      <div>
+        <h2 class="cohort-heading">Alerts &amp; Playbooks</h2>
+        <p class="cohort-subheading">Manage automated customer health alerts and custom CSM intervention playbooks.</p>
+      </div>
+      <div class="cohort-controls">
+        <button class="btn-primary" id="alerts-create-playbook-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create Playbook
+        </button>
+      </div>
+    </div>
+
+    <!-- Alert Tab Row -->
+    <div class="alert-tabs" id="alert-tabs" style="margin-bottom: 20px;">
+      <button class="alert-tab active" data-tab="Open">Open <span class="tab-count-badge" id="count-open">0</span></button>
+      <button class="alert-tab" data-tab="Acknowledged">Acknowledged <span class="tab-count-badge" id="count-acknowledged">0</span></button>
+      <button class="alert-tab" data-tab="Resolved">Resolved <span class="tab-count-badge" id="count-resolved">0</span></button>
+      <button class="alert-tab" data-tab="Playbooks">Playbooks</button>
+    </div>
+
+    <div class="alert-summary" id="alert-summary" style="margin-bottom: 20px; font-size: 0.95rem; color: var(--text-2);">
+      Loading alerts...
+    </div>
+
+    <!-- Layout: Alerts and Playbooks Columns -->
+    <div class="alerts-layout">
+      <!-- Left: Alerts Feed -->
+      <div class="alerts-list-container">
+        <div id="alerts-list" class="alerts-list">
+          <div class="empty-card">No alerts available. Train a model to start monitoring signals.</div>
+        </div>
+      </div>
+
+      <!-- Right: Playbooks Panel -->
+      <div class="playbooks-container">
+        <div id="playbooks-list" class="playbooks-list">
+          <div class="empty-card">Select a playbook template to review.</div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
   <!-- ── SECTION: PREDICT SINGLE ── -->
   <section class="section" id="section-predict">
     <div class="predict-grid">
@@ -779,6 +831,74 @@
       </div>
     </div>
   </section>
+
+  <!-- Playbook Builder Modal -->
+  <div class="drawer-overlay" id="playbook-builder-modal" style="display: none;">
+    <div class="drawer-panel" style="max-width: 580px;">
+      <button class="drawer-close" id="pb-close-btn">&times;</button>
+      <h3 style="font-size: 1.4rem; font-weight: 800; margin-bottom: 8px; color: var(--text-1)">Create Churn Prevention Playbook</h3>
+      <p style="font-size: 0.88rem; color: var(--text-3); margin-bottom: 24px;">Configure step-by-step actions and triggers to retain customer accounts.</p>
+      
+      <form id="pb-form">
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="input-label" for="pb-name">Playbook Name</label>
+          <input class="form-input" id="pb-name" placeholder="e.g. Premium Support Outreach" required style="width: 100%;" />
+        </div>
+        
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label class="input-label" for="pb-trigger">Trigger Condition</label>
+          <select class="form-input" id="pb-trigger" style="width: 100%;">
+            <option value="high_risk">Health Score drops below 40 (High Risk)</option>
+            <option value="medium_risk">Health Score drops below 65 (Medium Risk)</option>
+            <option value="inactivity">Days since last login exceeds 14 days</option>
+            <option value="tickets">Support tickets exceeds 3</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 24px;">
+          <label class="input-label">Intervention Steps</label>
+          <div id="pb-steps-container" style="display: grid; gap: 8px;">
+            <div style="display: flex; gap: 8px;">
+              <input class="form-input pb-step-input" placeholder="Step 1 description (e.g. Schedule personal CSM consultation)" required style="flex: 1;" />
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <input class="form-input pb-step-input" placeholder="Step 2 description (e.g. Send targeted promotion offering 20% discount)" required style="flex: 1;" />
+            </div>
+          </div>
+          <button type="button" class="btn-secondary btn-small" id="pb-add-step-btn" style="margin-top: 10px; width: fit-content;">+ Add Step</button>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;">
+          <button type="button" class="btn-secondary" id="pb-cancel-btn">Cancel</button>
+          <button type="submit" class="btn-primary">Save Playbook</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Run Playbook Manual Confirmation Modal -->
+  <div class="drawer-overlay" id="playbook-run-modal" style="display: none;">
+    <div class="drawer-panel" style="max-width: 480px;">
+      <button class="drawer-close" id="pr-close-btn">&times;</button>
+      <h3 style="font-size: 1.3rem; font-weight: 800; margin-bottom: 8px; color: var(--text-1)" id="pr-title">Execute Playbook</h3>
+      <p style="font-size: 0.88rem; color: var(--text-3); margin-bottom: 24px;">Select the customer you want to run this playbook intervention sequence for.</p>
+      
+      <form id="pr-form">
+        <input type="hidden" id="pr-playbook-id" />
+        <div class="form-group" style="margin-bottom: 24px;">
+          <label class="input-label" for="pr-customer-select">Select Customer</label>
+          <select class="form-input" id="pr-customer-select" style="width: 100%;" required>
+            <option value="">-- Choose a Customer --</option>
+          </select>
+        </div>
+        
+        <div style="display: flex; justify-content: flex-end; gap: 12px;">
+          <button type="button" class="btn-secondary" id="pr-cancel-btn">Cancel</button>
+          <button type="submit" class="btn-primary">Execute Now</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
 <script src="app.js"></script>
 </body>

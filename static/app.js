@@ -63,8 +63,42 @@ const hsState = {
   filtered : []
 };
 
+/* ── Alerts & Playbooks State ────────────────────────────────── */
+const alertsState = {
+  tab: 'Open',
+  alerts: {
+    Open: [],
+    Acknowledged: [],
+    Resolved: []
+  },
+  playbooks: [
+    {
+      id: 'pb-retention-booster',
+      name: 'Retention Booster',
+      trigger: 'Health Score < 40 (High Risk)',
+      status: 'Active',
+      steps: [
+        'Send personalized renewal offer with 15% discount',
+        'Schedule CSM customer health check-in call',
+        'Escalate open support tickets'
+      ]
+    },
+    {
+      id: 'pb-engagement-surge',
+      name: 'Engagement Surge',
+      trigger: 'Days since last login > 14 days',
+      status: 'Paused',
+      steps: [
+        'Launch custom automated feature adoption email flow',
+        'Invite user to next premium live product webinar',
+        'Trigger in-app satisfaction survey'
+      ]
+    }
+  ]
+};
+
 /* ══════════════════  NAVIGATION  ═════════════════════════════ */
-const sections = ['upload','overview','analytics','customers','health','cohort','predict','admin'];
+const sections = ['upload','overview','analytics','customers','health','cohort','alerts','predict','admin'];
 const titles   = {
   upload   : 'Upload & Train Model',
   overview : 'Overview Dashboard',
@@ -72,6 +106,7 @@ const titles   = {
   customers: 'Customer Risk List',
   health   : 'Customer Health Scores',
   cohort   : 'Cohort Analysis',
+  alerts   : 'Alerts & Playbooks',
   predict  : 'Predict Single Customer',
   admin    : 'Admin Console'
 };
@@ -96,6 +131,10 @@ function navigateTo(section) {
 
   if (section === 'cohort') {
     buildCohortView();
+  }
+
+  if (section === 'alerts') {
+    buildAlertsView();
   }
 
   // Close sidebar on mobile
@@ -295,6 +334,10 @@ function populateDashboard(data) {
   applyHsFilters();
   updateHsKpis();
   if ($('section-health')?.classList.contains('active')) renderHsGrid();
+
+  /* Alerts & Playbooks – generate on training */
+  generateAlertsFromCustomers();
+  if ($('section-alerts')?.classList.contains('active')) buildAlertsView();
 
   /* Cohort Analysis – precompute on training */
   if ($('section-cohort')?.classList.contains('active')) buildCohortView();
@@ -1904,6 +1947,391 @@ function buildCohortView() {
 $('cohort-seg')?.addEventListener('change', buildCohortView);
 $('cohort-metric')?.addEventListener('change', buildCohortView);
 $('cohort-refresh-btn')?.addEventListener('click', buildCohortView);
+
+/* ══════════════════  ALERTS & PLAYBOOKS (Phase 4)  ═══════════ */
+
+/* ── Dynamic Alert Generator from Customer Database ─────────── */
+function generateAlertsFromCustomers() {
+  if (!state.modelTrained || !state.allCustomers.length) {
+    alertsState.alerts.Open = [];
+    alertsState.alerts.Acknowledged = [];
+    alertsState.alerts.Resolved = [];
+    updateAlertTabsCount();
+    return;
+  }
+
+  const openList = [];
+  const ackList = [];
+  const resList = [];
+
+  state.allCustomers.forEach((c, idx) => {
+    // Generate signals based on features
+    const signals = [];
+    if (c.support >= 3) signals.push('Support Spike');
+    if (c.last_login >= 14) signals.push('Extended Inactivity');
+    if (c.logins < 5) signals.push('Login Drop');
+    if (c.monthly > 100) signals.push('High ARR Account');
+    if (signals.length === 0) signals.push('High Risk Score');
+
+    // Severity mapping
+    let severity = 'Info';
+    if (c.churn_prob >= 75 || signals.length >= 3) severity = 'High';
+    else if (c.churn_prob >= 40 || signals.length >= 2) severity = 'Medium';
+
+    const alertItem = {
+      id: `alt-${c.id}`,
+      customer: c.id,
+      severity: severity,
+      title: c.churn_prob >= 75 ? 'Critical Churn Probability' : 'Risk Signals Detected',
+      signals: signals,
+      time: `${idx + 1}h ago`,
+      details: `Customer ${c.id} has a churn probability of ${c.churn_prob}% with support ticket count of ${c.support}.`,
+      csm: 'Unassigned',
+      outcome: null
+    };
+
+    // Distribute among lists for demonstration
+    if (c.risk_level === 'High') {
+      openList.push(alertItem);
+    } else if (c.risk_level === 'Medium') {
+      alertItem.csm = 'CSM Member';
+      ackList.push(alertItem);
+    } else if (idx === 0) {
+      alertItem.outcome = 'Retained';
+      resList.push(alertItem);
+    }
+  });
+
+  alertsState.alerts.Open = openList;
+  alertsState.alerts.Acknowledged = ackList;
+  alertsState.alerts.Resolved = resList;
+  updateAlertTabsCount();
+}
+
+function updateAlertTabsCount() {
+  const openCount = alertsState.alerts.Open.length;
+  const ackCount = alertsState.alerts.Acknowledged.length;
+  const resCount = alertsState.alerts.Resolved.length;
+
+  if ($('count-open')) $('count-open').textContent = openCount;
+  if ($('count-acknowledged')) $('count-acknowledged').textContent = ackCount;
+  if ($('count-resolved')) $('count-resolved').textContent = resCount;
+}
+
+/* ── Build Alerts View ──────────────────────────────────────── */
+function buildAlertsView() {
+  const tab = alertsState.tab;
+  const summaryEl = $('alert-summary');
+  const alertListEl = $('alerts-list');
+  const playbookListEl = $('playbooks-list');
+
+  if (!summaryEl || !alertListEl || !playbookListEl) return;
+
+  // Render subheader description
+  const total = (alertsState.alerts[tab] || []).length;
+  if (tab === 'Playbooks') {
+    summaryEl.textContent = 'Review automated playbooks for churn prevention and growth.';
+  } else {
+    summaryEl.textContent = `Showing ${total} ${tab.toLowerCase()} alert${total === 1 ? '' : 's'} based on dynamic customer metrics.`;
+  }
+
+  // Render based on current active tab
+  if (tab === 'Playbooks') {
+    // Playbooks tab selected
+    alertListEl.innerHTML = `
+      <div class="empty-card" style="text-align: center; padding: 40px 20px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width: 48px; height: 48px; color: var(--text-3); margin-bottom: 12px;"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg>
+        <h4 style="color: var(--text-1); font-size: 1rem; margin-bottom: 6px;">Manage Playbooks</h4>
+        <p style="color: var(--text-3); font-size: 0.85rem; max-width: 320px; margin: 0 auto 16px;">Create, edit, or configure automated triggers and intervention tasks.</p>
+        <button class="btn-primary" onclick="openPlaybookBuilder()" style="margin: 0 auto;">+ Create New Playbook</button>
+      </div>`;
+    renderPlaybooksList(playbookListEl, true);
+  } else {
+    // Alert tab selected
+    renderAlertsList(alertListEl, alertsState.alerts[tab], tab);
+    renderPlaybooksList(playbookListEl, false);
+  }
+}
+
+/* ── Render Alerts ──────────────────────────────────────────── */
+function renderAlertsList(container, list, tab) {
+  if (!list || list.length === 0) {
+    container.innerHTML = `<div class="empty-card">No ${tab.toLowerCase()} alerts active.</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(alert => {
+    let actionsHtml = '';
+    let borderStyle = '';
+    
+    // Left border severity indicator
+    if (alert.severity === 'High') {
+      borderStyle = 'border-left: 4px solid var(--red);';
+    } else if (alert.severity === 'Medium') {
+      borderStyle = 'border-left: 4px solid var(--orange);';
+    } else {
+      borderStyle = 'border-left: 4px solid var(--accent);';
+    }
+
+    if (tab === 'Open') {
+      actionsHtml = `
+        <div class="alert-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+          <button class="btn-secondary btn-small" onclick="acknowledgeAlert('${alert.id}')">Acknowledge</button>
+          <button class="btn-secondary btn-small" onclick="assignAlertCSMPrompt('${alert.id}')">Assign CSM</button>
+          <button class="btn-danger btn-small" onclick="resolveAlertPrompt('${alert.id}')">Resolve</button>
+        </div>`;
+    } else if (tab === 'Acknowledged') {
+      actionsHtml = `
+        <div class="alert-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+          <span style="font-size: 0.82rem; color: var(--text-3); align-self: center;">CSM: <b>${alert.csm}</b></span>
+          <button class="btn-secondary btn-small" onclick="assignAlertCSMPrompt('${alert.id}')">Reassign</button>
+          <button class="btn-danger btn-small" onclick="resolveAlertPrompt('${alert.id}')">Resolve</button>
+        </div>`;
+    } else if (tab === 'Resolved') {
+      actionsHtml = `
+        <div style="margin-top: 12px; font-size: 0.82rem; color: var(--green); display: flex; align-items: center; gap: 6px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 14px; height: 14px;"><polyline points="20 6 9 17 4 12"/></svg>
+          Resolved (${alert.outcome || 'Retained'})
+        </div>`;
+    }
+
+    return `
+      <div class="alert-card" style="${borderStyle} padding: 16px; margin-bottom: 12px; background: rgba(255,255,255,0.04); border-radius: var(--radius);">
+        <div class="alert-meta" style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+          <div>
+            <div class="alert-title" style="font-weight: 700; color: var(--text-1); font-size: 0.95rem;">${alert.title}</div>
+            <div class="alert-sub" style="font-size: 0.78rem; color: var(--text-3);">Customer ${alert.customer} · ${alert.time}</div>
+          </div>
+          <span class="alert-badge ${alert.severity}" style="align-self: flex-start;">${alert.severity}</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-2); margin-bottom: 10px;">${alert.details}</p>
+        <div class="alert-badges" style="display: flex; gap: 6px; flex-wrap: wrap;">
+          ${alert.signals.map(s => `<span class="alert-badge" style="background: rgba(255,255,255,0.06); color: var(--text-2); font-size: 0.7rem; padding: 2px 6px;">${s}</span>`).join('')}
+        </div>
+        ${actionsHtml}
+      </div>`;
+  }).join('');
+}
+
+/* ── Render Playbooks ───────────────────────────────────────── */
+function renderPlaybooksList(container, fullMode) {
+  if (alertsState.playbooks.length === 0) {
+    container.innerHTML = '<div class="empty-card">No playbooks configured.</div>';
+    return;
+  }
+
+  const headingHtml = fullMode
+    ? '<h3 class="card-title" style="margin-bottom: 16px;">Automated Prevention Playbooks</h3>'
+    : '<h3 class="card-title" style="margin-bottom: 16px;">Available Interventions</h3>';
+
+  const cards = alertsState.playbooks.map(pb => {
+    return `
+      <div class="playbook-card" style="margin-bottom: 14px;">
+        <div class="playbook-meta" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h4 style="font-weight: 700; color: var(--text-1); font-size: 0.95rem;">${pb.name}</h4>
+          <span class="alert-badge ${pb.status === 'Active' ? 'Low' : 'Medium'}">${pb.status}</span>
+        </div>
+        <div style="font-size: 0.78rem; color: var(--text-3); margin-bottom: 10px;">Trigger: <i>${pb.trigger}</i></div>
+        <div class="playbook-steps" style="display: grid; gap: 6px; margin-bottom: 14px;">
+          ${pb.steps.map((step, idx) => `
+            <div class="playbook-step" style="font-size: 0.82rem; color: var(--text-2); background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: var(--radius); display: flex; gap: 8px;">
+              <span style="color: var(--accent); font-weight: 700;">${idx + 1}</span>
+              <span>${step}</span>
+            </div>`).join('')}
+        </div>
+        <div class="playbook-footer" style="display: flex; gap: 8px;">
+          <button class="btn-secondary btn-small" onclick="triggerPlaybookRun('${pb.id}')">Run Manually</button>
+          <button class="btn-secondary btn-small" onclick="togglePlaybookStatus('${pb.id}')">${pb.status === 'Active' ? 'Pause' : 'Activate'}</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = headingHtml + cards;
+}
+
+/* ── Alert State Actions ────────────────────────────────────── */
+function acknowledgeAlert(id) {
+  const alertIndex = alertsState.alerts.Open.findIndex(a => a.id === id);
+  if (alertIndex > -1) {
+    const alert = alertsState.alerts.Open.splice(alertIndex, 1)[0];
+    alert.status = 'Acknowledged';
+    alert.csm = 'CSM Member';
+    alertsState.alerts.Acknowledged.push(alert);
+    showToast(`Alert for ${alert.customer} acknowledged by CSM.`, 'success');
+    updateAlertTabsCount();
+    buildAlertsView();
+  }
+}
+
+function assignAlertCSMPrompt(id) {
+  const csm = prompt("Enter CSM Name to Assign:", "Jane Doe");
+  if (csm) {
+    let alert = alertsState.alerts.Open.find(a => a.id === id);
+    if (!alert) alert = alertsState.alerts.Acknowledged.find(a => a.id === id);
+
+    if (alert) {
+      alert.csm = csm;
+      // If it was open, move to acknowledged since it now has assignment
+      const openIdx = alertsState.alerts.Open.findIndex(a => a.id === id);
+      if (openIdx > -1) {
+        alertsState.alerts.Open.splice(openIdx, 1);
+        alertsState.alerts.Acknowledged.push(alert);
+      }
+      showToast(`Assigned customer ${alert.customer} to CSM ${csm}.`, 'success');
+      updateAlertTabsCount();
+      buildAlertsView();
+    }
+  }
+}
+
+function resolveAlertPrompt(id) {
+  const outcome = confirm("Resolve Alert? Click OK if Customer was RETAINED, or Cancel if Customer CHURNED.");
+  const outcomeText = outcome ? 'Retained' : 'Churned';
+
+  let alert = alertsState.alerts.Open.find(a => a.id === id);
+  let openIdx = alertsState.alerts.Open.findIndex(a => a.id === id);
+  if (openIdx > -1) {
+    alertsState.alerts.Open.splice(openIdx, 1);
+  } else {
+    alert = alertsState.alerts.Acknowledged.find(a => a.id === id);
+    const ackIdx = alertsState.alerts.Acknowledged.findIndex(a => a.id === id);
+    if (ackIdx > -1) alertsState.alerts.Acknowledged.splice(ackIdx, 1);
+  }
+
+  if (alert) {
+    alert.status = 'Resolved';
+    alert.outcome = outcomeText;
+    alertsState.alerts.Resolved.push(alert);
+    showToast(`Alert resolved as: ${outcomeText}`, 'success');
+    updateAlertTabsCount();
+    buildAlertsView();
+  }
+}
+
+/* ── Playbook status toggle ─────────────────────────────────── */
+function togglePlaybookStatus(id) {
+  const pb = alertsState.playbooks.find(p => p.id === id);
+  if (pb) {
+    pb.status = pb.status === 'Active' ? 'Paused' : 'Active';
+    showToast(`Playbook "${pb.name}" is now ${pb.status.toLowerCase()}.`, 'success');
+    buildAlertsView();
+  }
+}
+
+/* ── Playbook Builder Modal Actions ─────────────────────────── */
+function openPlaybookBuilder() {
+  const modal = $('playbook-builder-modal');
+  if (modal) {
+    // Reset steps container to default 2 steps
+    $('pb-steps-container').innerHTML = `
+      <div style="display: flex; gap: 8px;">
+        <input class="form-input pb-step-input" placeholder="Step 1 description (e.g. Schedule personal CSM consultation)" required style="flex: 1;" />
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <input class="form-input pb-step-input" placeholder="Step 2 description (e.g. Send targeted promotion offering 20% discount)" required style="flex: 1;" />
+      </div>`;
+    $('pb-form').reset();
+    modal.style.display = 'flex';
+  }
+}
+
+function closePlaybookBuilder() {
+  const modal = $('playbook-builder-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+$('pb-close-btn')?.addEventListener('click', closePlaybookBuilder);
+$('pb-cancel-btn')?.addEventListener('click', closePlaybookBuilder);
+
+$('pb-add-step-btn')?.addEventListener('click', () => {
+  const container = $('pb-steps-container');
+  if (container) {
+    const idx = container.children.length + 1;
+    const stepDiv = document.createElement('div');
+    stepDiv.style.display = 'flex';
+    stepDiv.style.gap = '8px';
+    stepDiv.innerHTML = `<input class="form-input pb-step-input" placeholder="Step ${idx} description..." required style="flex: 1;" />`;
+    container.appendChild(stepDiv);
+  }
+});
+
+$('pb-form')?.addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('pb-name').value;
+  const triggerText = $('pb-trigger').options[$('pb-trigger').selectedIndex].text;
+  
+  const steps = [];
+  document.querySelectorAll('.pb-step-input').forEach(input => {
+    if (input.value.trim()) steps.push(input.value.trim());
+  });
+
+  const newPlaybook = {
+    id: `pb-${Date.now()}`,
+    name: name,
+    trigger: triggerText,
+    status: 'Active',
+    steps: steps
+  };
+
+  alertsState.playbooks.push(newPlaybook);
+  showToast(`Playbook "${name}" successfully created.`, 'success');
+  closePlaybookBuilder();
+  buildAlertsView();
+});
+
+/* ── Playbook Run Manual Trigger ────────────────────────────── */
+function triggerPlaybookRun(id) {
+  const playbook = alertsState.playbooks.find(p => p.id === id);
+  const modal = $('playbook-run-modal');
+  const select = $('pr-customer-select');
+
+  if (playbook && modal && select) {
+    $('pr-title').textContent = `Run Playbook: ${playbook.name}`;
+    $('pr-playbook-id').value = playbook.id;
+    
+    // Populate customer dropdown
+    let optionsHtml = '<option value="">-- Choose a Customer --</option>';
+    if (state.allCustomers && state.allCustomers.length > 0) {
+      optionsHtml += state.allCustomers.map(c => `<option value="${c.id}">${c.id} (${c.risk_level} Risk - ${c.churn_prob}% Churn)</option>`).join('');
+    } else {
+      optionsHtml += '<option value="DEMO">Demo Customer (No active model)</option>';
+    }
+    select.innerHTML = optionsHtml;
+    modal.style.display = 'flex';
+  }
+}
+
+function closePlaybookRun() {
+  const modal = $('playbook-run-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+$('pr-close-btn')?.addEventListener('click', closePlaybookRun);
+$('pr-cancel-btn')?.addEventListener('click', closePlaybookRun);
+
+$('pr-form')?.addEventListener('submit', e => {
+  e.preventDefault();
+  const pbId = $('pr-playbook-id').value;
+  const customerId = $('pr-customer-select').value;
+  const playbook = alertsState.playbooks.find(p => p.id === pbId);
+
+  if (playbook && customerId) {
+    showToast(`Executing playbook "${playbook.name}" for customer ${customerId}.`, 'success');
+    closePlaybookRun();
+  }
+});
+
+/* ── Wire up alert tab click handlers ───────────────────────── */
+document.querySelectorAll('#alert-tabs .alert-tab').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('#alert-tabs .alert-tab').forEach(b => b.classList.remove('active'));
+    button.classList.add('active');
+    alertsState.tab = button.dataset.tab;
+    buildAlertsView();
+  });
+});
+
+$('alerts-create-playbook-btn')?.addEventListener('click', openPlaybookBuilder);
 
 /* ══════════════════  INIT  ════════════════════════════════ */
 initAuthUI();

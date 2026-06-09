@@ -1111,6 +1111,20 @@ canvas { display: block; }
   background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(168,85,247,0.15));
   border-color: rgba(129,140,248,0.35);
 }
+.tab-count-badge {
+  background: rgba(255,255,255,0.08);
+  color: var(--text-2);
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  margin-left: 6px;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+.alert-tab.active .tab-count-badge {
+  background: var(--red);
+  color: #fff;
+}
 .alert-summary,
 .cohort-summary {
   color: var(--text-2);
