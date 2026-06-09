@@ -42,6 +42,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
       Customers
     </a>
+    <a class="nav-item" data-section="health" href="#" id="nav-health">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      Health Scores
+    </a>
     <a class="nav-item admin-only" data-section="admin" href="#" id="nav-admin" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4"/><path d="M18.36 5.64l-2.83 2.83"/><path d="M21 12h-4"/><path d="M18.36 18.36l-2.83-2.83"/><path d="M12 21v-4"/><path d="M5.64 18.36l2.83-2.83"/><path d="M3 12h4"/><path d="M5.64 5.64l2.83 2.83"/></svg>
       Admin
@@ -319,6 +323,95 @@
       </div>
       <div class="table-pagination" id="table-pagination"></div>
     </div>
+  </section>
+
+  <!-- ── SECTION: HEALTH SCORES ── -->
+  <section class="section" id="section-health">
+
+    <!-- Toolbar -->
+    <div class="health-header">
+      <div>
+        <h2 class="health-heading">Customer Health Scores</h2>
+        <p class="health-subheading">AI-derived per-customer health based on engagement, tenure, spend &amp; support signals.</p>
+      </div>
+      <div class="health-actions">
+        <!-- Trend filter -->
+        <div class="hs-filter-group">
+          <label class="input-label">Trend</label>
+          <div class="hs-pill-row" id="hs-trend-filters">
+            <button class="hs-pill active" data-trend="all">All</button>
+            <button class="hs-pill" data-trend="improving">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 12 8 6 12 10"/></svg>
+              Improving
+            </button>
+            <button class="hs-pill" data-trend="stable">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="8" x2="14" y2="8"/></svg>
+              Stable
+            </button>
+            <button class="hs-pill" data-trend="declining">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 6 8 12 12 8"/></svg>
+              Declining
+            </button>
+          </div>
+        </div>
+        <!-- Risk filter -->
+        <div class="hs-filter-group">
+          <label class="input-label">Risk Tier</label>
+          <div class="hs-pill-row" id="hs-risk-filters">
+            <button class="hs-pill active" data-risk="all">All</button>
+            <button class="hs-pill" data-risk="High">High</button>
+            <button class="hs-pill" data-risk="Medium">Medium</button>
+            <button class="hs-pill" data-risk="Low">Low</button>
+          </div>
+        </div>
+        <!-- Sort -->
+        <div class="hs-filter-group">
+          <label class="input-label">Sort by</label>
+          <select id="hs-sort" class="hs-select">
+            <option value="score_asc">Score ↑ (worst first)</option>
+            <option value="score_desc">Score ↓ (best first)</option>
+            <option value="prob_desc">Churn Prob ↓</option>
+            <option value="tenure_desc">Tenure ↓</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary KPIs -->
+    <div class="hs-kpi-row" id="hs-kpi-row">
+      <div class="hs-kpi-card">
+        <span class="hs-kpi-val" id="hs-kpi-avg">–</span>
+        <span class="hs-kpi-lbl">Avg. Health Score</span>
+      </div>
+      <div class="hs-kpi-card">
+        <span class="hs-kpi-val red" id="hs-kpi-critical">–</span>
+        <span class="hs-kpi-lbl">Critical (&lt;40)</span>
+      </div>
+      <div class="hs-kpi-card">
+        <span class="hs-kpi-val orange" id="hs-kpi-at-risk">–</span>
+        <span class="hs-kpi-lbl">At-Risk (40–65)</span>
+      </div>
+      <div class="hs-kpi-card">
+        <span class="hs-kpi-val green" id="hs-kpi-healthy">–</span>
+        <span class="hs-kpi-lbl">Healthy (&gt;65)</span>
+      </div>
+      <div class="hs-kpi-card">
+        <span class="hs-kpi-val blue" id="hs-kpi-improving">–</span>
+        <span class="hs-kpi-lbl">Improving Trend</span>
+      </div>
+    </div>
+
+    <!-- Card Grid -->
+    <div id="hs-card-grid" class="hs-grid">
+      <div class="hs-empty">
+        <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="rgba(99,102,241,0.08)"/><path d="M22 32 L28 38 L42 24" stroke="#818cf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <p>Train a model first to see customer health scores.</p>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div class="hs-pagination" id="hs-pagination"></div>
+
   </section>
 
   <!-- ── SECTION: PREDICT SINGLE ── -->

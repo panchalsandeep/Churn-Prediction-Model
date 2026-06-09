@@ -53,13 +53,24 @@ let state = {
 const $  = id => document.getElementById(id);
 const qs = s  => document.querySelector(s);
 
+/* ── Health Scores State ─────────────────────────────────────── */
+const hsState = {
+  trend    : 'all',
+  risk     : 'all',
+  sort     : 'score_asc',
+  page     : 1,
+  scores   : [],
+  filtered : []
+};
+
 /* ══════════════════  NAVIGATION  ═════════════════════════════ */
-const sections = ['upload','overview','analytics','customers','predict','admin'];
+const sections = ['upload','overview','analytics','customers','health','predict','admin'];
 const titles   = {
   upload   : 'Upload & Train Model',
   overview : 'Overview Dashboard',
   analytics: 'Analytics & Model Performance',
   customers: 'Customer Risk List',
+  health   : 'Customer Health Scores',
   predict  : 'Predict Single Customer',
   admin    : 'Admin Console'
 };
@@ -73,6 +84,13 @@ function navigateTo(section) {
 
   if (section === 'admin') {
     loadAdminPanel();
+  }
+
+  if (section === 'health') {
+    if (state.modelTrained && !hsState.scores.length) buildHealthScores();
+    applyHsFilters();
+    updateHsKpis();
+    renderHsGrid();
   }
 
   // Close sidebar on mobile
@@ -89,7 +107,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
       showToast('Admin access is restricted to administrators only.', 'error');
       return;
     }
-    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin') {
+    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin' && sec !== 'health') {
       showToast('Please upload data and train a model first.', 'error');
       return;
     }
@@ -266,6 +284,12 @@ function populateDashboard(data) {
   /* Customer table */
   state.filteredCustomers = [...state.allCustomers];
   renderCustomerTable();
+
+  /* Health Scores – build whenever new data arrives */
+  buildHealthScores();
+  applyHsFilters();
+  updateHsKpis();
+  if ($('section-health')?.classList.contains('active')) renderHsGrid();
 }
 
 /* ══════════════════  CHART BUILDERS  ══════════════════════════ */
@@ -1200,6 +1224,355 @@ $('admin-user-table')?.addEventListener('click', e => {
   if (uid && action) {
     modifyAdminUser(uid, action);
   }
+});
+
+/* ══════════════════  HEALTH SCORES  ══════════════════════════ */
+const HS_PAGE_SIZE = 9;
+
+/* ── Score formula ──────────────────────────────────────────── */
+function computeHealthScore(c) {
+  // Each component 0-100; total is weighted mean
+  const tenureScore    = Math.min(100, (c.tenure / 36) * 100);          // 0–36 months → 0-100
+  const engageScore    = Math.min(100, (c.logins ?? 10) / 25 * 100);    // logins last 30 days
+  const supportScore   = Math.max(0, 100 - (c.support ?? 0) * 18);      // fewer tickets = better
+  const spendScore     = Math.min(100, (c.monthly ?? 50) / 120 * 100);  // spend up to $120
+  const loyaltyScore   = Math.max(0, 100 - (c.last_login ?? 5) * 3);   // days since login
+
+  // Weight: Tenure 25% | Engagement 25% | Support 20% | Spend 15% | Loyalty 15%
+  const total = (tenureScore * 0.25) + (engageScore * 0.25) +
+                (supportScore * 0.20) + (spendScore * 0.15) +
+                (loyaltyScore * 0.15);
+
+  // Churn probability subtracts up to 30 pts
+  const churnPenalty = (c.churn_prob / 100) * 30;
+  const final = Math.max(0, Math.min(100, total - churnPenalty));
+
+  return {
+    total       : Math.round(final),
+    tenure      : Math.round(tenureScore),
+    engagement  : Math.round(engageScore),
+    support     : Math.round(supportScore),
+    spend       : Math.round(spendScore),
+    loyalty     : Math.round(loyaltyScore)
+  };
+}
+
+function deriveTrend(c) {
+  // Derive a pseudo-trend from tenure + support signals
+  if (c.tenure >= 18 && (c.support ?? 0) <= 1 && c.churn_prob < 35) return 'improving';
+  if (c.churn_prob > 60 || (c.support ?? 0) >= 4) return 'declining';
+  return 'stable';
+}
+
+function buildDragDown(score) {
+  const reasons = [];
+  if (score.support < 40) reasons.push('High support ticket volume dragging health down');
+  if (score.loyalty < 40) reasons.push('Extended inactivity reducing loyalty score');
+  if (score.engagement < 30) reasons.push('Low login frequency signals disengagement');
+  if (score.tenure < 25)   reasons.push('Short customer tenure adds uncertainty');
+  return reasons[0] || null;
+}
+
+function buildRecs(c) {
+  const recs = [];
+  if (c.churn_prob >= 70)  recs.push('Schedule urgent executive business review');
+  if (c.support >= 4)      recs.push('Escalate open tickets and assign a dedicated CSM');
+  if (c.last_login >= 14)  recs.push('Send personalised re-engagement campaign');
+  if (c.tenure <= 3)       recs.push('Enrol in onboarding success programme');
+  if (c.monthly <= 30)     recs.push('Offer upsell / expansion conversation');
+  if (recs.length === 0)   recs.push('Continue standard success check-in cadence');
+  return recs.slice(0, 3);
+}
+
+/* ── Compute all scores once training completes ─────────────── */
+function buildHealthScores() {
+  hsState.scores = state.allCustomers.map(c => {
+    const score = computeHealthScore(c);
+    return {
+      id        : c.id,
+      score     : score.total,
+      components: score,
+      trend     : deriveTrend(c),
+      risk      : c.risk_level,
+      churn_prob: c.churn_prob,
+      tenure    : c.tenure,
+      monthly   : c.monthly,
+      support   : c.support,
+      last_login: c.last_login,
+      logins    : c.logins,
+      actual    : c.actual,
+      recs      : buildRecs(c),
+      dragDown  : buildDragDown(score)
+    };
+  });
+}
+
+/* ── Filter + Sort ──────────────────────────────────────────── */
+function applyHsFilters() {
+  let data = [...hsState.scores];
+  if (hsState.risk !== 'all')  data = data.filter(c => c.risk === hsState.risk);
+  if (hsState.trend !== 'all') data = data.filter(c => c.trend === hsState.trend);
+
+  switch (hsState.sort) {
+    case 'score_asc':   data.sort((a, b) => a.score - b.score); break;
+    case 'score_desc':  data.sort((a, b) => b.score - a.score); break;
+    case 'prob_desc':   data.sort((a, b) => b.churn_prob - a.churn_prob); break;
+    case 'tenure_desc': data.sort((a, b) => b.tenure - a.tenure); break;
+  }
+  hsState.filtered = data;
+  hsState.page = 1;
+}
+
+/* ── KPI summary strip ──────────────────────────────────────── */
+function updateHsKpis() {
+  const data = hsState.filtered;
+  if (!data.length) {
+    ['hs-kpi-avg','hs-kpi-critical','hs-kpi-at-risk','hs-kpi-healthy','hs-kpi-improving']
+      .forEach(id => { if ($(id)) $(id).textContent = '–'; });
+    return;
+  }
+  const avg       = Math.round(data.reduce((s, c) => s + c.score, 0) / data.length);
+  const critical  = data.filter(c => c.score < 40).length;
+  const atRisk    = data.filter(c => c.score >= 40 && c.score <= 65).length;
+  const healthy   = data.filter(c => c.score > 65).length;
+  const improving = data.filter(c => c.trend === 'improving').length;
+
+  $('hs-kpi-avg').textContent       = avg;
+  $('hs-kpi-critical').textContent  = critical;
+  $('hs-kpi-at-risk').textContent   = atRisk;
+  $('hs-kpi-healthy').textContent   = healthy;
+  $('hs-kpi-improving').textContent = improving;
+}
+
+/* ── Score ring mini-chart ──────────────────────────────────── */
+function drawHsRing(canvas, score) {
+  if (!canvas) return;
+  // Destroy any previous Chart.js instance on this canvas
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+
+  const color = score >= 66 ? '#34d399' : score >= 40 ? '#fb923c' : '#f87171';
+  new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [score, 100 - score],
+        backgroundColor: [color, 'rgba(255,255,255,0.05)'],
+        borderWidth: 0,
+        hoverOffset: 0
+      }]
+    },
+    options: {
+      responsive: false,
+      cutout: '76%',
+      animation: { animateRotate: true, duration: 700 },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }
+  });
+}
+
+/* ── Trend icon HTML ────────────────────────────────────────── */
+function trendIcon(trend) {
+  if (trend === 'improving')
+    return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 11 7 5 11 9 14 6"/></svg>`;
+  if (trend === 'declining')
+    return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 5 7 11 11 7 14 10"/></svg>`;
+  return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="8" x2="14" y2="8"/></svg>`;
+}
+
+/* ── Render one health card ─────────────────────────────────── */
+function renderHsCard(c) {
+  const { components: sc } = c;
+  const comps = [
+    { label: 'Tenure',      val: sc.tenure },
+    { label: 'Engagement',  val: sc.engagement },
+    { label: 'Support',     val: sc.support },
+    { label: 'Spend',       val: sc.spend },
+    { label: 'Loyalty',     val: sc.loyalty }
+  ];
+  const fillColor = c.score >= 66 ? '#34d399' : c.score >= 40 ? '#fb923c' : '#f87171';
+  const canvasId = `hs-ring-${c.id.replace(/\s+/g,'_')}`;
+
+  const dragHtml = c.dragDown
+    ? `<div class="hs-drag-down">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        ${c.dragDown}
+      </div>`
+    : '';
+
+  const recsHtml = c.recs.map(r => `<li>${r}</li>`).join('');
+
+  const metaItems = [
+    { label: 'Monthly Spend', val: `$${(c.monthly||0).toFixed(0)}` },
+    { label: 'Support Tickets', val: c.support ?? 0 },
+    { label: 'Last Login',      val: `${c.last_login ?? 0} days ago` },
+    { label: 'Actual Churn',    val: c.actual === 1 ? '● Churned' : '● Retained' }
+  ];
+
+  return `
+    <div class="hs-card tier-${c.risk}" data-id="${c.id}" id="hsc-${c.id.replace(/\s+/g,'_')}">
+      <!-- Header -->
+      <div class="hs-card-header">
+        <span class="hs-card-id">${c.id}</span>
+        <div class="hs-card-badges">
+          <span class="hs-tier-badge ${c.risk}">${c.risk}</span>
+          <span class="hs-trend-badge ${c.trend}">${trendIcon(c.trend)} ${c.trend.charAt(0).toUpperCase()+c.trend.slice(1)}</span>
+        </div>
+      </div>
+
+      <!-- Score Ring -->
+      <div class="hs-score-row">
+        <div class="hs-score-ring">
+          <canvas id="${canvasId}" width="72" height="72"></canvas>
+          <div class="hs-score-label">
+            <span class="hs-score-num">${c.score}</span>
+            <span class="hs-score-sub">score</span>
+          </div>
+        </div>
+        <div class="hs-score-meta">
+          <div class="hs-score-churn"><strong>${c.churn_prob}%</strong> churn prob.</div>
+          <div class="hs-score-tenure">Tenure: ${c.tenure} mo</div>
+        </div>
+      </div>
+
+      <!-- Component bars -->
+      <div class="hs-components">
+        ${comps.map(comp => `
+          <div class="hs-comp-row">
+            <div class="hs-comp-header"><span>${comp.label}</span><span>${comp.val}</span></div>
+            <div class="hs-comp-bar">
+              <div class="hs-comp-fill" style="width:${comp.val}%; background:${comp.val >= 60 ? '#34d399' : comp.val >= 35 ? '#fb923c' : '#f87171'};"></div>
+            </div>
+          </div>`).join('')}
+      </div>
+
+      ${dragHtml}
+
+      <!-- Expand toggle -->
+      <button class="hs-card-expand-btn" aria-expanded="false">
+        View CSM Actions
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+
+      <!-- Expandable detail -->
+      <div class="hs-card-detail">
+        <p class="hs-detail-title">Recommended Actions</p>
+        <ul class="hs-detail-recs">${recsHtml}</ul>
+        <p class="hs-detail-title">Customer Snapshot</p>
+        <div class="hs-detail-meta">
+          ${metaItems.map(m => `
+            <div class="hs-detail-meta-item">
+              <strong>${m.val}</strong>${m.label}
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── Render the full grid ───────────────────────────────────── */
+function renderHsGrid() {
+  const grid = $('hs-card-grid');
+  if (!grid) return;
+
+  const data  = hsState.filtered;
+  const pages = Math.ceil(data.length / HS_PAGE_SIZE);
+  const start = (hsState.page - 1) * HS_PAGE_SIZE;
+  const paged = data.slice(start, start + HS_PAGE_SIZE);
+
+  if (paged.length === 0) {
+    grid.innerHTML = `<div class="hs-empty">
+      <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="rgba(99,102,241,0.08)"/><line x1="20" y1="32" x2="44" y2="32" stroke="#818cf8" stroke-width="3" stroke-linecap="round"/></svg>
+      <p>No customers match these filters.</p>
+    </div>`;
+    $('hs-pagination').innerHTML = '';
+    return;
+  }
+
+  grid.innerHTML = paged.map(renderHsCard).join('');
+
+  // Draw rings after DOM insert
+  requestAnimationFrame(() => {
+    paged.forEach(c => {
+      const canvasId = `hs-ring-${c.id.replace(/\s+/g,'_')}`;
+      const canvas   = document.getElementById(canvasId);
+      if (canvas) drawHsRing(canvas, c.score);
+    });
+  });
+
+  // Expand/collapse cards
+  grid.querySelectorAll('.hs-card-expand-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const card = btn.closest('.hs-card');
+      const isExp = card.classList.toggle('expanded');
+      btn.setAttribute('aria-expanded', isExp);
+    });
+  });
+
+  // Whole card click also toggles
+  grid.querySelectorAll('.hs-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const isExp = card.classList.toggle('expanded');
+      const btn   = card.querySelector('.hs-card-expand-btn');
+      if (btn) btn.setAttribute('aria-expanded', isExp);
+    });
+  });
+
+  renderHsPagination(pages);
+}
+
+/* ── Pagination ─────────────────────────────────────────────── */
+function renderHsPagination(pages) {
+  const wrap = $('hs-pagination');
+  if (!wrap || pages <= 1) { if (wrap) wrap.innerHTML = ''; return; }
+
+  let html = `<button class="page-btn" ${hsState.page===1?'disabled':''} data-hp="${hsState.page-1}">‹ Prev</button>`;
+  for (let i = 1; i <= pages; i++) {
+    if (pages > 7 && i > 3 && i < pages - 1 && Math.abs(i - hsState.page) > 1) {
+      if (i === 4) html += '<span style="color:var(--text-3);padding:0 4px">…</span>';
+      continue;
+    }
+    html += `<button class="page-btn ${i===hsState.page?'active':''}" data-hp="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" ${hsState.page===pages?'disabled':''} data-hp="${hsState.page+1}">Next ›</button>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('.page-btn[data-hp]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      hsState.page = parseInt(btn.dataset.hp);
+      renderHsGrid();
+    });
+  });
+}
+
+/* ── Full refresh ───────────────────────────────────────────── */
+function refreshHealthView() {
+  if (!state.modelTrained || !hsState.scores.length) return;
+  applyHsFilters();
+  updateHsKpis();
+  renderHsGrid();
+}
+
+/* ── Wire up filters ────────────────────────────────────────── */
+document.querySelectorAll('#hs-trend-filters .hs-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#hs-trend-filters .hs-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    hsState.trend = btn.dataset.trend;
+    refreshHealthView();
+  });
+});
+document.querySelectorAll('#hs-risk-filters .hs-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#hs-risk-filters .hs-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    hsState.risk = btn.dataset.risk;
+    refreshHealthView();
+  });
+});
+$('hs-sort')?.addEventListener('change', () => {
+  hsState.sort = $('hs-sort').value;
+  refreshHealthView();
 });
 
 /* ══════════════════  INIT  ════════════════════════════════ */
