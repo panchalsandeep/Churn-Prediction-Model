@@ -990,7 +990,98 @@ canvas { display: block; }
 .heatmap-cell { padding: 16px 10px; border-radius: 12px; text-align: center; font-size: 0.75rem; font-weight: 700; color: #fff; line-height: 1.3; }
 .heatmap-empty { padding: 100px 16px; text-align: center; color: var(--text-2); }
 
+/* ══════════════════  COHORT ANALYSIS (Phase 3)  ══════════════ */
+.cohort-heading {
+  font-size: 1.5rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, #e2e8f0, #a5b4fc, #c084fc);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.4px;
+  margin-bottom: 4px;
+}
+.cohort-subheading { color: var(--text-2); font-size: 0.87rem; }
+.cohort-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.cohort-refresh-btn { padding: 9px 18px; font-size: 0.82rem; gap: 7px; white-space: nowrap; }
+.cohort-refresh-btn svg { width: 15px; height: 15px; }
+.cohort-kpi-row { display: flex; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+
+/* Main grid */
+.cohort-main-grid {
+  display: grid;
+  grid-template-columns: 1.7fr 1fr;
+  gap: 20px;
+  margin-bottom: 22px;
+}
+.cohort-heatmap-card { padding: 22px; overflow: hidden; }
+.cohort-heatmap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cohort-heatmap-sub { font-size: 0.78rem; color: var(--text-3); font-weight: 500; }
+.cohort-heatmap-wrap { overflow-x: auto; }
+.cohort-heatmap-empty { padding: 60px 16px; text-align: center; color: var(--text-2); font-size: 0.9rem; }
+
+/* Heatmap table */
+.ch-table { display: flex; flex-direction: column; gap: 4px; min-width: 560px; }
+.ch-row {
+  display: grid;
+  grid-template-columns: 120px 70px repeat(7, 1fr) 80px;
+  gap: 4px;
+  align-items: center;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.ch-row:not(.ch-header-row):hover { background: rgba(255,255,255,0.03); }
+.ch-row.ch-selected { outline: 1px solid rgba(129,140,248,0.5); background: rgba(99,102,241,0.06); }
+.ch-header-row { cursor: default; }
+.ch-cell { padding: 9px 8px; font-size: 0.73rem; font-weight: 600; text-align: center; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ch-label-cell { color: var(--text-2); background: rgba(255,255,255,0.02); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.4px; }
+.ch-name-cell { text-align: left; color: var(--text-1); font-weight: 700; font-size: 0.78rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+.ch-count-cell { color: var(--text-2); font-size: 0.78rem; }
+.ch-val-cell { font-size: 0.75rem; font-weight: 700; transition: transform 0.15s; cursor: default; }
+.ch-val-cell:hover { transform: scale(1.08); z-index: 2; position: relative; }
+.ch-avg-cell { color: var(--text-2); font-size: 0.75rem; background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+
+/* Segment Insights */
+.cohort-summary-card { padding: 22px; }
+.cohort-empty-msg { color: var(--text-2); font-size: 0.88rem; }
+.cohort-insights { display: flex; flex-direction: column; gap: 14px; }
+.ci-badges { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.ci-badge { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--radius-sm); font-size: 0.78rem; font-weight: 600; line-height: 1.4; }
+.ci-badge svg { width: 14px; height: 14px; flex-shrink: 0; }
+.ci-badge.green { background: rgba(52,211,153,0.09); color: var(--green); border: 1px solid rgba(52,211,153,0.2); }
+.ci-badge.red   { background: rgba(248,113,113,0.09); color: var(--red);   border: 1px solid rgba(248,113,113,0.2); }
+.ci-badge strong { color: var(--text-1); }
+.cohort-insight-rows { display: flex; flex-direction: column; gap: 8px; }
+.cohort-insight-row { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 10px; animation: fadeIn 0.3s ease both; }
+.cir-name { font-size: 0.75rem; font-weight: 700; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cir-bar-wrap { height: 6px; border-radius: 99px; background: rgba(255,255,255,0.07); overflow: hidden; }
+.cir-bar { height: 100%; border-radius: 99px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+.cir-stats { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; min-width: 70px; }
+.cir-stats .green  { color: var(--green); font-size: 0.73rem; font-weight: 700; }
+.cir-stats .orange { color: var(--orange); font-size: 0.73rem; font-weight: 700; }
+.cir-stats .red    { color: var(--red);   font-size: 0.73rem; font-weight: 700; }
+.cir-stats .dim    { color: var(--text-3); font-size: 0.68rem; }
+
+/* Chart row */
 .cohort-chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+@media (max-width: 960px) {
+  .cohort-main-grid { grid-template-columns: 1fr; }
+  .cohort-chart-row { grid-template-columns: 1fr; }
+}
 
 .alerts-layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 20px; }
 .alerts-list, .playbooks-list { display: grid; gap: 14px; }

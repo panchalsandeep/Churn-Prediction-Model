@@ -64,13 +64,14 @@ const hsState = {
 };
 
 /* ══════════════════  NAVIGATION  ═════════════════════════════ */
-const sections = ['upload','overview','analytics','customers','health','predict','admin'];
+const sections = ['upload','overview','analytics','customers','health','cohort','predict','admin'];
 const titles   = {
   upload   : 'Upload & Train Model',
   overview : 'Overview Dashboard',
   analytics: 'Analytics & Model Performance',
   customers: 'Customer Risk List',
   health   : 'Customer Health Scores',
+  cohort   : 'Cohort Analysis',
   predict  : 'Predict Single Customer',
   admin    : 'Admin Console'
 };
@@ -93,6 +94,10 @@ function navigateTo(section) {
     renderHsGrid();
   }
 
+  if (section === 'cohort') {
+    buildCohortView();
+  }
+
   // Close sidebar on mobile
   if (window.innerWidth <= 768) {
     document.querySelector('.sidebar').classList.remove('open');
@@ -107,7 +112,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
       showToast('Admin access is restricted to administrators only.', 'error');
       return;
     }
-    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin' && sec !== 'health') {
+    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin' && sec !== 'health' && sec !== 'cohort') {
       showToast('Please upload data and train a model first.', 'error');
       return;
     }
@@ -290,6 +295,9 @@ function populateDashboard(data) {
   applyHsFilters();
   updateHsKpis();
   if ($('section-health')?.classList.contains('active')) renderHsGrid();
+
+  /* Cohort Analysis – precompute on training */
+  if ($('section-cohort')?.classList.contains('active')) buildCohortView();
 }
 
 /* ══════════════════  CHART BUILDERS  ══════════════════════════ */
@@ -1574,6 +1582,296 @@ $('hs-sort')?.addEventListener('change', () => {
   hsState.sort = $('hs-sort').value;
   refreshHealthView();
 });
+
+/* ══════════════════  COHORT ANALYSIS (Phase 3)  ═══════════════ */
+
+/* ── Segmentation helpers ───────────────────────────────────── */
+function getCohortKey(c, seg) {
+  switch (seg) {
+    case 'contract':
+      return c.contract_type || 'Unknown';
+    case 'tenure':
+      if (c.tenure <= 3)  return '0–3 mo';
+      if (c.tenure <= 12) return '4–12 mo';
+      if (c.tenure <= 24) return '13–24 mo';
+      return '24+ mo';
+    case 'risk':
+      return c.risk_level || 'Unknown';
+    case 'spend':
+      if ((c.monthly || 0) < 40)  return '<$40';
+      if ((c.monthly || 0) < 70)  return '$40–70';
+      if ((c.monthly || 0) < 100) return '$70–100';
+      return '$100+';
+    default:
+      return 'All';
+  }
+}
+
+/* Simulate 6-month retention cohort data from customer snapshot */
+function simulateRetentionCurve(customers) {
+  // Month 0 = 100%; subsequent months derive from churn probability
+  const months = [0, 1, 2, 3, 4, 5, 6];
+  const avgChurnProb = customers.reduce((s, c) => s + (c.churn_prob / 100), 0) / (customers.length || 1);
+  return months.map(m => {
+    const retained = Math.max(5, Math.round(100 * Math.pow(1 - avgChurnProb * 0.4, m)));
+    return retained;
+  });
+}
+
+/* ── Segment computation ────────────────────────────────────── */
+function computeCohorts(seg) {
+  const groups = {};
+  state.allCustomers.forEach(c => {
+    const key = getCohortKey(c, seg);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(c);
+  });
+
+  return Object.entries(groups).map(([name, customers]) => {
+    const total       = customers.length;
+    const churnCount  = customers.filter(c => c.actual === 1).length;
+    const churnRate   = total ? Math.round((churnCount / total) * 100) : 0;
+    const retention   = 100 - churnRate;
+    const avgChurnProb = Math.round(customers.reduce((s, c) => s + c.churn_prob, 0) / (total || 1));
+    const avgTenure   = Math.round(customers.reduce((s, c) => s + (c.tenure || 0), 0) / (total || 1));
+    const highRisk    = customers.filter(c => c.risk_level === 'High').length;
+    const curve       = simulateRetentionCurve(customers);
+    return { name, total, churnCount, churnRate, retention, avgChurnProb, avgTenure, highRisk, curve, customers };
+  }).sort((a, b) => b.retention - a.retention);
+}
+
+/* ── Colour helpers ─────────────────────────────────────────── */
+function retentionColor(pct) {
+  // Green (high) → Yellow → Red (low)
+  if (pct >= 80) return { bg: 'rgba(52,211,153,0.75)',  text: '#fff' };
+  if (pct >= 65) return { bg: 'rgba(52,211,153,0.45)',  text: '#e2e8f0' };
+  if (pct >= 50) return { bg: 'rgba(251,191,36,0.55)',  text: '#fff' };
+  if (pct >= 35) return { bg: 'rgba(251,146,60,0.65)',  text: '#fff' };
+  return             { bg: 'rgba(248,113,113,0.75)',  text: '#fff' };
+}
+
+/* ── Heatmap ────────────────────────────────────────────────── */
+function buildHeatmap(cohorts, metric) {
+  const wrap = $('cohort-heatmap');
+  if (!wrap) return;
+
+  const months = ['M0', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6'];
+
+  // Header row
+  let html = `<div class="ch-table">`;
+
+  // Column headers
+  html += `<div class="ch-row ch-header-row">
+    <div class="ch-cell ch-label-cell">Segment</div>
+    <div class="ch-cell ch-label-cell">Customers</div>
+    ${months.map(m => `<div class="ch-cell ch-month-cell">${m}</div>`).join('')}
+    <div class="ch-cell ch-label-cell">Avg Churn%</div>
+  </div>`;
+
+  cohorts.forEach((coh, idx) => {
+    const values = metric === 'churn'
+      ? coh.curve.map(v => 100 - v)
+      : coh.curve;
+
+    html += `<div class="ch-row" data-cohort="${idx}">
+      <div class="ch-cell ch-name-cell" title="${coh.name}">${coh.name}</div>
+      <div class="ch-cell ch-count-cell">${coh.total}</div>
+      ${values.map((val, mi) => {
+        const { bg, text } = metric === 'churn'
+          ? { bg: retentionColor(100 - val).bg, text: retentionColor(100 - val).text }
+          : retentionColor(val);
+        return `<div class="ch-cell ch-val-cell" style="background:${bg};color:${text}" title="${coh.name} ${months[mi]}: ${val}%">${val}%</div>`;
+      }).join('')}
+      <div class="ch-cell ch-avg-cell">${coh.avgChurnProb}%</div>
+    </div>`;
+  });
+
+  html += `</div>`;
+  wrap.innerHTML = html;
+
+  // Click row to highlight
+  wrap.querySelectorAll('.ch-row[data-cohort]').forEach(row => {
+    row.addEventListener('click', () => {
+      wrap.querySelectorAll('.ch-row').forEach(r => r.classList.remove('ch-selected'));
+      row.classList.toggle('ch-selected');
+    });
+  });
+
+  $('cohort-heatmap-sub').textContent = `${cohorts.length} segments × 7 months — ${metric === 'churn' ? 'Churn' : 'Retention'} rates`;
+}
+
+/* ── Segment Insights panel ─────────────────────────────────── */
+function buildInsights(cohorts) {
+  const el = $('cohort-insights');
+  if (!el || !cohorts.length) return;
+
+  const best  = cohorts[0];
+  const worst = cohorts[cohorts.length - 1];
+
+  const rows = cohorts.map((coh, i) => `
+    <div class="cohort-insight-row" style="animation-delay:${i * 50}ms">
+      <div class="cir-name">${coh.name}</div>
+      <div class="cir-bar-wrap">
+        <div class="cir-bar" style="width:${coh.retention}%; background:${coh.retention>=65?'#34d399':coh.retention>=40?'#fb923c':'#f87171'}"></div>
+      </div>
+      <div class="cir-stats">
+        <span class="${coh.retention>=65?'green':coh.retention>=40?'orange':'red'}">${coh.retention}% ret.</span>
+        <span class="dim">${coh.total} cust</span>
+      </div>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <div class="ci-badges">
+      <div class="ci-badge green">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="2 10 6 6 10 8 14 4"/></svg>
+        Best: <strong>${best.name}</strong> (${best.retention}% ret.)
+      </div>
+      <div class="ci-badge red">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="2 4 6 8 10 6 14 10"/></svg>
+        Worst: <strong>${worst.name}</strong> (${worst.retention}% ret.)
+      </div>
+    </div>
+    <div class="cohort-insight-rows">${rows}</div>`;
+}
+
+/* ── KPI strip ──────────────────────────────────────────────── */
+function updateCohortKpis(cohorts) {
+  if (!cohorts.length) return;
+  const best    = cohorts[0];
+  const worst   = cohorts[cohorts.length - 1];
+  const avgTen  = Math.round(cohorts.reduce((s, c) => s + c.avgTenure, 0) / cohorts.length);
+  const total   = cohorts.reduce((s, c) => s + c.total, 0);
+
+  $('cohort-kpi-segments').textContent  = cohorts.length;
+  $('cohort-kpi-best-ret').textContent  = best.retention + '%';
+  $('cohort-kpi-worst-ret').textContent = worst.retention + '%';
+  $('cohort-kpi-avg-tenure').textContent = avgTen;
+  $('cohort-kpi-total').textContent     = total;
+}
+
+/* ── Retention Curve chart ──────────────────────────────────── */
+const COHORT_PALETTE = [
+  '#818cf8','#34d399','#f87171','#fb923c','#fbbf24','#60a5fa','#a78bfa','#22d3ee'
+];
+function buildRetentionCurveChart(cohorts, metric) {
+  destroyChart('cohortRetention');
+  const ctx = $('cohortRetentionChart')?.getContext('2d');
+  if (!ctx) return;
+
+  const months = ['Month 0','Month 1','Month 2','Month 3','Month 4','Month 5','Month 6'];
+  state.charts.cohortRetention = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: months,
+      datasets: cohorts.map((coh, i) => ({
+        label: coh.name,
+        data: metric === 'churn' ? coh.curve.map(v => 100 - v) : coh.curve,
+        borderColor: COHORT_PALETTE[i % COHORT_PALETTE.length],
+        backgroundColor: 'transparent',
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2.5
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10, padding: 16 } },
+        tooltip: tooltipStyle()
+      },
+      scales: {
+        x: gridStyle(),
+        y: {
+          ...gridStyle(),
+          min: 0, max: 100,
+          ticks: { callback: v => v + '%' },
+          title: { display: true, text: metric === 'churn' ? 'Churn Rate (%)' : 'Retention Rate (%)', color: '#64748b' }
+        }
+      }
+    }
+  });
+}
+
+/* ── Churn Rate bar chart ───────────────────────────────────── */
+function buildCohortChurnChart(cohorts) {
+  destroyChart('cohortChurn');
+  const ctx = $('cohortChurnChart')?.getContext('2d');
+  if (!ctx) return;
+
+  state.charts.cohortChurn = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: cohorts.map(c => c.name),
+      datasets: [
+        {
+          label: 'Churn Rate %',
+          data: cohorts.map(c => c.churnRate),
+          backgroundColor: cohorts.map(c =>
+            c.churnRate > 50 ? 'rgba(248,113,113,0.7)' :
+            c.churnRate > 30 ? 'rgba(251,146,60,0.7)' :
+            'rgba(52,211,153,0.7)'
+          ),
+          borderRadius: 6,
+          borderSkipped: false
+        },
+        {
+          label: 'High Risk Count',
+          data: cohorts.map(c => Math.round((c.highRisk / c.total) * 100)),
+          backgroundColor: 'rgba(129,140,248,0.25)',
+          borderColor: '#818cf8',
+          borderWidth: 1.5,
+          borderRadius: 6,
+          type: 'bar'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { usePointStyle: true, padding: 14 } },
+        tooltip: tooltipStyle()
+      },
+      scales: {
+        x: gridStyle(),
+        y: {
+          ...gridStyle(),
+          min: 0, max: 100,
+          ticks: { callback: v => v + '%' },
+          title: { display: true, text: 'Percentage (%)', color: '#64748b' }
+        }
+      }
+    }
+  });
+}
+
+/* ── Master build ───────────────────────────────────────────── */
+function buildCohortView() {
+  const seg    = $('cohort-seg')?.value    || 'contract';
+  const metric = $('cohort-metric')?.value || 'retention';
+
+  if (!state.modelTrained || !state.allCustomers.length) {
+    const wrap = $('cohort-heatmap');
+    if (wrap) wrap.innerHTML = '<div class="cohort-heatmap-empty">Train a model first to see cohort data.</div>';
+    const ins = $('cohort-insights');
+    if (ins) ins.innerHTML = '<p class="cohort-empty-msg">Train a model to populate cohort insights.</p>';
+    return;
+  }
+
+  const cohorts = computeCohorts(seg);
+  updateCohortKpis(cohorts);
+  buildHeatmap(cohorts, metric);
+  buildInsights(cohorts);
+  buildRetentionCurveChart(cohorts, metric);
+  buildCohortChurnChart(cohorts);
+}
+
+/* ── Event bindings ─────────────────────────────────────────── */
+$('cohort-seg')?.addEventListener('change', buildCohortView);
+$('cohort-metric')?.addEventListener('change', buildCohortView);
+$('cohort-refresh-btn')?.addEventListener('click', buildCohortView);
 
 /* ══════════════════  INIT  ════════════════════════════════ */
 initAuthUI();

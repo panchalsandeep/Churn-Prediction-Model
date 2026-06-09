@@ -46,6 +46,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
       Health Scores
     </a>
+    <a class="nav-item" data-section="cohort" href="#" id="nav-cohort">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Cohort Analysis
+    </a>
     <a class="nav-item admin-only" data-section="admin" href="#" id="nav-admin" style="display:none">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4"/><path d="M18.36 5.64l-2.83 2.83"/><path d="M21 12h-4"/><path d="M18.36 18.36l-2.83-2.83"/><path d="M12 21v-4"/><path d="M5.64 18.36l2.83-2.83"/><path d="M3 12h4"/><path d="M5.64 5.64l2.83 2.83"/></svg>
       Admin
@@ -411,6 +415,98 @@
 
     <!-- Pagination -->
     <div class="hs-pagination" id="hs-pagination"></div>
+
+  </section>
+
+  <!-- ── SECTION: COHORT ANALYSIS ── -->
+  <section class="section" id="section-cohort">
+
+    <!-- Toolbar -->
+    <div class="cohort-toolbar">
+      <div>
+        <h2 class="cohort-heading">Cohort Analysis</h2>
+        <p class="cohort-subheading">Segment customers by contract type, tenure band, or risk tier and track retention over time.</p>
+      </div>
+      <div class="cohort-controls">
+        <div class="hs-filter-group">
+          <label class="input-label">Segment by</label>
+          <select id="cohort-seg" class="hs-select">
+            <option value="contract">Contract Type</option>
+            <option value="tenure">Tenure Band</option>
+            <option value="risk">Risk Tier</option>
+            <option value="spend">Spend Band</option>
+          </select>
+        </div>
+        <div class="hs-filter-group">
+          <label class="input-label">Metric</label>
+          <select id="cohort-metric" class="hs-select">
+            <option value="retention">Retention Rate</option>
+            <option value="churn">Churn Rate</option>
+          </select>
+        </div>
+        <button class="btn-primary cohort-refresh-btn" id="cohort-refresh-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI row -->
+    <div class="cohort-kpi-row" id="cohort-kpi-row">
+      <div class="hs-kpi-card"><span class="hs-kpi-val" id="cohort-kpi-segments">–</span><span class="hs-kpi-lbl">Segments</span></div>
+      <div class="hs-kpi-card"><span class="hs-kpi-val green" id="cohort-kpi-best-ret">–</span><span class="hs-kpi-lbl">Best Retention</span></div>
+      <div class="hs-kpi-card"><span class="hs-kpi-val red" id="cohort-kpi-worst-ret">–</span><span class="hs-kpi-lbl">Worst Retention</span></div>
+      <div class="hs-kpi-card"><span class="hs-kpi-val blue" id="cohort-kpi-avg-tenure">–</span><span class="hs-kpi-lbl">Avg Tenure (mo)</span></div>
+      <div class="hs-kpi-card"><span class="hs-kpi-val orange" id="cohort-kpi-total">–</span><span class="hs-kpi-lbl">Total Customers</span></div>
+    </div>
+
+    <!-- Main layout: heatmap + summary -->
+    <div class="cohort-main-grid">
+
+      <!-- Retention Heatmap -->
+      <div class="card cohort-heatmap-card">
+        <div class="cohort-heatmap-header">
+          <h3 class="card-title" style="margin-bottom:0">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+            Retention Heatmap
+          </h3>
+          <p class="cohort-heatmap-sub" id="cohort-heatmap-sub">Group × Month retention rates</p>
+        </div>
+        <div id="cohort-heatmap" class="cohort-heatmap-wrap">
+          <div class="cohort-heatmap-empty">Train a model to generate cohort data.</div>
+        </div>
+      </div>
+
+      <!-- Cohort Summary card -->
+      <div class="card cohort-summary-card">
+        <h3 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+          Segment Insights
+        </h3>
+        <div id="cohort-insights" class="cohort-insights">
+          <p class="cohort-empty-msg">Select a segment type and train a model.</p>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Charts row -->
+    <div class="cohort-chart-row">
+      <div class="card chart-card">
+        <h3 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Retention Curves by Segment
+        </h3>
+        <div class="chart-wrap"><canvas id="cohortRetentionChart"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h3 class="card-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          Churn Rate by Segment
+        </h3>
+        <div class="chart-wrap"><canvas id="cohortChurnChart"></canvas></div>
+      </div>
+    </div>
 
   </section>
 
