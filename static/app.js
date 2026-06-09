@@ -309,7 +309,25 @@ Chart.defaults.color = chartDefaults.color;
 Chart.defaults.font.family = chartDefaults.font.family;
 
 function destroyChart(key) {
-  if (state.charts[key]) { state.charts[key].destroy(); delete state.charts[key]; }
+  if (state.charts[key]) {
+    try {
+      state.charts[key].destroy();
+    } catch (e) {
+      console.warn("Failed to destroy state chart:", key, e);
+    }
+    delete state.charts[key];
+  }
+  const el = $(key);
+  if (el) {
+    const existing = Chart.getChart(el);
+    if (existing) {
+      try {
+        existing.destroy();
+      } catch (e) {
+        console.warn("Failed to destroy existing chart on canvas:", key, e);
+      }
+    }
+  }
 }
 
 /* Trend Chart */
@@ -1482,6 +1500,15 @@ function renderHsGrid() {
   const grid = $('hs-card-grid');
   if (!grid) return;
 
+  if (!state.modelTrained) {
+    grid.innerHTML = `<div class="hs-empty">
+      <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="rgba(99,102,241,0.08)"/><path d="M22 32 L28 38 L42 24" stroke="#818cf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p>Train a model first to see customer health scores.</p>
+    </div>`;
+    $('hs-pagination').innerHTML = '';
+    return;
+  }
+
   const data  = hsState.filtered;
   const pages = Math.ceil(data.length / HS_PAGE_SIZE);
   const start = (hsState.page - 1) * HS_PAGE_SIZE;
@@ -1517,9 +1544,12 @@ function renderHsGrid() {
     });
   });
 
-  // Whole card click also toggles
+  // Whole card click also toggles (but ignore if click was inside details panel)
   grid.querySelectorAll('.hs-card').forEach(card => {
-    card.addEventListener('click', () => {
+    card.addEventListener('click', e => {
+      if (e.target.closest('.hs-card-detail')) {
+        return;
+      }
       const isExp = card.classList.toggle('expanded');
       const btn   = card.querySelector('.hs-card-expand-btn');
       if (btn) btn.setAttribute('aria-expanded', isExp);
@@ -1857,6 +1887,8 @@ function buildCohortView() {
     if (wrap) wrap.innerHTML = '<div class="cohort-heatmap-empty">Train a model first to see cohort data.</div>';
     const ins = $('cohort-insights');
     if (ins) ins.innerHTML = '<p class="cohort-empty-msg">Train a model to populate cohort insights.</p>';
+    destroyChart('cohortRetention');
+    destroyChart('cohortChurn');
     return;
   }
 
