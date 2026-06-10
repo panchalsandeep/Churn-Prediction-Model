@@ -509,14 +509,19 @@ def admin_whoami():
     if is_admin_session():
         return jsonify({'is_admin': True, 'email': None, 'uid': None, 'mode': 'session'})
 
-    if not firebase_initialized or not (os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')):
-        return jsonify({'is_admin': False, 'email': None, 'message': 'Auth not fully configured in this environment.'})
-    return jsonify({
-        'is_admin': is_admin_token(request.user),
-        'email': request.user.get('email'),
-        'uid': request.user.get('uid'),
-        'mode': 'firebase'
-    })
+    # If we have a decoded user token (even without full Firebase Admin SDK),
+    # check the email against the ADMIN_EMAILS environment variable list.
+    if hasattr(request, 'user') and request.user:
+        email = (request.user.get('email') or '').lower()
+        is_admin = bool(email and email in ADMIN_EMAILS) or request.user.get('admin') is True
+        return jsonify({
+            'is_admin': is_admin,
+            'email': email,
+            'uid': request.user.get('uid'),
+            'mode': 'firebase'
+        })
+
+    return jsonify({'is_admin': False, 'email': None, 'message': 'Auth not fully configured in this environment.'})
 
 
 @app.route('/api/admin/login', methods=['POST'])
