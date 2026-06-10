@@ -154,7 +154,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
       showToast('Admin access is restricted to administrators only.', 'error');
       return;
     }
-    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin' && sec !== 'health' && sec !== 'cohort') {
+    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin' && sec !== 'health' && sec !== 'cohort' && sec !== 'alerts') {
       showToast('Please upload data and train a model first.', 'error');
       return;
     }

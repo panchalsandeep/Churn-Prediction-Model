@@ -308,6 +308,12 @@ def upload_file():
             'monthly':      float(row.get('monthly_charges', 0)) if hasattr(row, 'get') else 0,
             'support':      int(row.get('support_tickets', 0)) if hasattr(row, 'get') else 0,
             'last_login':   int(row.get('last_login_days', 0)) if hasattr(row, 'get') else 0,
+            'contract_type': str(row.get('contract_type', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'payment_method': str(row.get('payment_method', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'gender':       str(row.get('gender', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'location':     str(row.get('location', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'num_products': int(row.get('num_products', 0)) if hasattr(row, 'get') else 0,
+            'age':          int(row.get('age', 0)) if hasattr(row, 'get') else 0,
         })
 
     customer_list_sorted = sorted(customer_list, key=lambda x: x['churn_prob'], reverse=True)
