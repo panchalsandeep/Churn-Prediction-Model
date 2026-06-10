@@ -313,6 +313,7 @@ def upload_file():
             'gender':       str(row.get('gender', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
             'location':     str(row.get('location', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
             'num_products': int(row.get('num_products', 0)) if hasattr(row, 'get') else 0,
+            'logins':       int(row.get('num_logins_last30', 0)) if hasattr(row, 'get') else 0,
             'age':          int(row.get('age', 0)) if hasattr(row, 'get') else 0,
         })
 

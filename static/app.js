@@ -305,6 +305,13 @@ document.querySelectorAll('.algo-pill').forEach(pill => {
   });
 });
 
+// Initialize on load
+document.addEventListener('DOMContentLoaded', () => {
+  if ($('algo-description')) {
+    $('algo-description').innerHTML = algoDescriptions[state.algorithm] || '';
+  }
+});
+
 /* ── Train button ────────────────────────────────────────────── */
 $('train-btn').addEventListener('click', trainModel);
 
