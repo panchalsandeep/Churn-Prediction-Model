@@ -113,8 +113,11 @@ const titles   = {
 
 function navigateTo(section) {
   sections.forEach(s => {
-    $(`section-${s}`).classList.toggle('active', s === section);
-    $(`nav-${s}`).classList.toggle('active', s === section);
+    const secEl = $(`section-${s}`);
+    if (secEl) secEl.classList.toggle('active', s === section);
+    document.querySelectorAll(`.nav-item[data-section="${s}"]`).forEach(el => {
+      el.classList.toggle('active', s === section);
+    });
   });
   $('page-title').textContent = titles[section];
 

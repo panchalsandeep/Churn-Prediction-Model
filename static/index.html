@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js" defer></script>
   <link rel="stylesheet" href="style.css" />
   <!-- Firebase SDK Compat (Web v10) -->
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -72,7 +72,7 @@
         <span class="profile-name" id="user-display-name">Loading...</span>
         <span class="profile-email" id="user-display-email">email@domain.com</span>
       </div>
-      <button class="logout-btn" id="logout-btn" title="Sign Out">
+      <button class="logout-btn" id="logout-btn" title="Sign Out" aria-label="Sign Out">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
       </button>
     </div>
@@ -90,7 +90,7 @@
   <!-- TOP BAR -->
   <header class="topbar">
     <div class="topbar-left">
-      <button class="menu-toggle" id="menu-toggle">
+      <button class="menu-toggle" id="menu-toggle" aria-label="Toggle Menu">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
       </button>
       <h1 class="page-title" id="page-title">Upload & Train Model</h1>
@@ -133,7 +133,7 @@
             <span class="file-name" id="file-name-display"></span>
             <span class="file-size" id="file-size-display"></span>
           </div>
-          <button class="remove-file" id="remove-file">✕</button>
+          <button class="remove-file" id="remove-file" aria-label="Remove File">✕</button>
         </div>
 
         <div class="algo-select-group">
@@ -222,11 +222,11 @@
     <div class="charts-row">
       <div class="card chart-card">
         <h3 class="card-title">Churn Rate Trend</h3>
-        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+        <div class="chart-wrap"><canvas id="trendChart" role="img" aria-label="Churn Rate Trend Chart"></canvas></div>
       </div>
       <div class="card chart-card">
         <h3 class="card-title">Risk Distribution</h3>
-        <div class="chart-wrap chart-wrap--sm"><canvas id="riskDonutChart"></canvas></div>
+        <div class="chart-wrap chart-wrap--sm"><canvas id="riskDonutChart" role="img" aria-label="Risk Distribution Donut Chart"></canvas></div>
         <div class="donut-legend" id="donut-legend"></div>
       </div>
     </div>
@@ -237,15 +237,15 @@
     <div class="analytics-grid">
       <div class="card chart-card">
         <h3 class="card-title">Churn Probability Distribution</h3>
-        <div class="chart-wrap"><canvas id="probDistChart"></canvas></div>
+        <div class="chart-wrap"><canvas id="probDistChart" role="img" aria-label="Churn Probability Distribution Chart"></canvas></div>
       </div>
       <div class="card chart-card">
         <h3 class="card-title">ROC Curve</h3>
-        <div class="chart-wrap"><canvas id="rocChart"></canvas></div>
+        <div class="chart-wrap"><canvas id="rocChart" role="img" aria-label="ROC Curve Chart"></canvas></div>
       </div>
       <div class="card chart-card">
         <h3 class="card-title">Top Feature Importance</h3>
-        <div class="chart-wrap"><canvas id="featureChart"></canvas></div>
+        <div class="chart-wrap"><canvas id="featureChart" role="img" aria-label="Top Feature Importance Chart"></canvas></div>
       </div>
       <div class="card metrics-card">
         <h3 class="card-title">Model Performance</h3>
@@ -311,7 +311,7 @@
 
     <div class="card table-card">
       <div class="table-wrapper">
-        <table class="customer-table" id="customer-table">
+        <table class="customer-table" id="customer-table" aria-label="Customer Risk List">
           <thead>
             <tr>
               <th>Customer ID</th>
@@ -501,14 +501,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           Retention Curves by Segment
         </h3>
-        <div class="chart-wrap"><canvas id="cohortRetentionChart"></canvas></div>
+        <div class="chart-wrap"><canvas id="cohortRetentionChart" role="img" aria-label="Retention Curves by Segment"></canvas></div>
       </div>
       <div class="card chart-card">
         <h3 class="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
           Churn Rate by Segment
         </h3>
-        <div class="chart-wrap"><canvas id="cohortChurnChart"></canvas></div>
+        <div class="chart-wrap"><canvas id="cohortChurnChart" role="img" aria-label="Churn Rate by Segment"></canvas></div>
       </div>
     </div>
 
@@ -572,11 +572,11 @@
         <form id="predict-form" class="predict-form">
           <div class="form-row">
             <div class="form-group">
-              <label>Age</label>
+              <label for="p-age">Age</label>
               <input type="number" id="p-age" value="35" min="18" max="80" />
             </div>
             <div class="form-group">
-              <label>Gender</label>
+              <label for="p-gender">Gender</label>
               <select id="p-gender">
                 <option>Male</option><option>Female</option>
               </select>
@@ -584,47 +584,47 @@
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Tenure (months)</label>
+              <label for="p-tenure">Tenure (months)</label>
               <input type="number" id="p-tenure" value="12" min="0" />
             </div>
             <div class="form-group">
-              <label>Monthly Charges ($)</label>
+              <label for="p-monthly">Monthly Charges ($)</label>
               <input type="number" id="p-monthly" value="65" step="0.01" />
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Total Charges ($)</label>
+              <label for="p-total">Total Charges ($)</label>
               <input type="number" id="p-total" value="780" step="0.01" />
             </div>
             <div class="form-group">
-              <label>Num Products</label>
+              <label for="p-products">Num Products</label>
               <input type="number" id="p-products" value="1" min="1" max="10" />
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Logins Last 30 Days</label>
+              <label for="p-logins">Logins Last 30 Days</label>
               <input type="number" id="p-logins" value="10" min="0" />
             </div>
             <div class="form-group">
-              <label>Support Tickets</label>
+              <label for="p-tickets">Support Tickets</label>
               <input type="number" id="p-tickets" value="2" min="0" />
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Days Since Last Login</label>
+              <label for="p-lastlogin">Days Since Last Login</label>
               <input type="number" id="p-lastlogin" value="5" min="0" />
             </div>
             <div class="form-group">
-              <label>Location</label>
+              <label for="p-location">Location</label>
               <input type="text" id="p-location" value="New York" />
             </div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label>Contract Type</label>
+              <label for="p-contract">Contract Type</label>
               <select id="p-contract">
                 <option>Month-to-month</option>
                 <option>One year</option>
@@ -632,7 +632,7 @@
               </select>
             </div>
             <div class="form-group">
-              <label>Payment Method</label>
+              <label for="p-payment">Payment Method</label>
               <select id="p-payment">
                 <option>Credit card</option>
                 <option>Electronic check</option>
@@ -658,7 +658,7 @@
         <div class="result-content" id="result-content" style="display:none">
           <div class="prob-gauge-wrap">
             <div class="prob-gauge" id="prob-gauge">
-              <canvas id="gaugeCanvas" width="220" height="130"></canvas>
+              <canvas id="gaugeCanvas" width="220" height="130" role="img" aria-label="Churn Probability Gauge"></canvas>
               <div class="gauge-overlay">
                 <span class="gauge-val" id="gauge-val">0%</span>
                 <span class="gauge-sub">Churn Probability</span>
@@ -682,6 +682,26 @@
     </div>
   </section>
 
+  <!-- ── BOTTOM NAV (MOBILE) ── -->
+  <nav class="bottom-nav" id="bottom-nav">
+    <a class="nav-item bnav-item active" data-section="overview" href="#" aria-label="Overview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      <span>Overview</span>
+    </a>
+    <a class="nav-item bnav-item" data-section="customers" href="#" aria-label="Customers">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      <span>Customers</span>
+    </a>
+    <a class="nav-item bnav-item" data-section="health" href="#" aria-label="Health Scores">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <span>Health</span>
+    </a>
+    <a class="nav-item bnav-item" data-section="alerts" href="#" aria-label="Alerts">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <span>Alerts</span>
+    </a>
+  </nav>
+
 </main>
 
 <!-- Loading Overlay -->
@@ -695,7 +715,7 @@
 </div>
 
 <!-- ═══════════════════════════  FIREBASE AUTH OVERLAY  ═══════════════════════════ -->
-<div id="auth-overlay" style="display: none;">
+<div id="auth-overlay" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="auth-subtitle">
   <div class="auth-card">
     <div class="auth-header">
       <div class="logo-icon">
@@ -832,9 +852,9 @@
   </section>
 
   <!-- Playbook Builder Modal -->
-  <div class="drawer-overlay" id="playbook-builder-modal" style="display: none;">
+  <div class="drawer-overlay" id="playbook-builder-modal" style="display: none;" role="dialog" aria-modal="true">
     <div class="drawer-panel" style="max-width: 580px;">
-      <button class="drawer-close" id="pb-close-btn">&times;</button>
+      <button class="drawer-close" id="pb-close-btn" aria-label="Close Playbook Builder">&times;</button>
       <h3 style="font-size: 1.4rem; font-weight: 800; margin-bottom: 8px; color: var(--text-1)">Create Churn Prevention Playbook</h3>
       <p style="font-size: 0.88rem; color: var(--text-3); margin-bottom: 24px;">Configure step-by-step actions and triggers to retain customer accounts.</p>
       
@@ -876,9 +896,9 @@
   </div>
 
   <!-- Run Playbook Manual Confirmation Modal -->
-  <div class="drawer-overlay" id="playbook-run-modal" style="display: none;">
+  <div class="drawer-overlay" id="playbook-run-modal" style="display: none;" role="dialog" aria-modal="true">
     <div class="drawer-panel" style="max-width: 480px;">
-      <button class="drawer-close" id="pr-close-btn">&times;</button>
+      <button class="drawer-close" id="pr-close-btn" aria-label="Close Playbook Runner">&times;</button>
       <h3 style="font-size: 1.3rem; font-weight: 800; margin-bottom: 8px; color: var(--text-1)" id="pr-title">Execute Playbook</h3>
       <p style="font-size: 0.88rem; color: var(--text-3); margin-bottom: 24px;">Select the customer you want to run this playbook intervention sequence for.</p>
       
