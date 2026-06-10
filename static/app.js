@@ -1062,13 +1062,7 @@ function initAuthUI() {
       state.admin.settings = null;
       state.admin.modelStatus = null;
 
-      try {
-        const res = await fetch(`${API}/admin/session`, { method: 'GET' });
-        const body = await res.json();
-        state.admin.isAdmin = body.is_admin === true;
-      } catch (err) {
-        state.admin.isAdmin = false;
-      }
+      await refreshAdminAccess();
 
       if (state.admin.isAdmin) {
         $('user-profile-section').style.display = 'none';
@@ -1169,11 +1163,21 @@ function getAdminToken() {
   return localStorage.getItem('churnsight_admin_token') || '';
 }
 
-// Helper: build auth headers for admin API calls
-function adminHeaders(extraHeaders = {}) {
-  const h = { 'Content-Type': 'application/json', ...extraHeaders };
+// Helper: build auth headers for admin API calls (handling both HMAC and Firebase token)
+async function getAdminHeaders(extraHeaders = {}) {
+  const h = { ...extraHeaders };
   const tok = getAdminToken();
-  if (tok) h['X-Admin-Token'] = tok;
+  if (tok) {
+    h['X-Admin-Token'] = tok;
+  }
+  if (state.user) {
+    try {
+      const firebaseToken = await state.user.getIdToken();
+      h['Authorization'] = `Bearer ${firebaseToken}`;
+    } catch (err) {
+      console.warn('Failed to get Firebase ID token:', err);
+    }
+  }
   return h;
 }
 
@@ -1187,14 +1191,16 @@ async function refreshAdminAccess() {
         headers: { Authorization: `Bearer ${token}` }
       });
       const body = await res.json();
-      state.admin.isAdmin = body.is_admin === true;
-      if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
-        loadAdminPanel();
+      if (body.is_admin === true) {
+        state.admin.isAdmin = true;
+        if ($('section-admin').classList.contains('active')) {
+          loadAdminPanel();
+        }
+        updateAdminNavigation();
+        return;
       }
-      updateAdminNavigation();
-      return;
     } catch (err) {
-      // fall through
+      console.warn('Firebase admin check failed:', err);
     }
   }
 
@@ -1208,14 +1214,16 @@ async function refreshAdminAccess() {
         body: JSON.stringify({ token: adminTok })
       });
       const body = await res.json();
-      state.admin.isAdmin = body.is_admin === true;
-      if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
-        loadAdminPanel();
+      if (body.is_admin === true) {
+        state.admin.isAdmin = true;
+        if ($('section-admin').classList.contains('active')) {
+          loadAdminPanel();
+        }
+        updateAdminNavigation();
+        return;
       }
-      updateAdminNavigation();
-      return;
     } catch (err) {
-      // fall through
+      console.warn('Local admin token verification failed:', err);
     }
   }
 
@@ -1236,10 +1244,8 @@ async function loadAdminUsers() {
   const list = $('admin-user-list');
   list.innerHTML = '<tr><td class="empty-row" colspan="5">Loading users…</td></tr>';
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/users`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await getAdminHeaders();
+    const res = await fetch(`${API}/admin/users`, { headers });
     const body = await res.json();
     if (!res.ok) {
       list.innerHTML = `<tr><td class="empty-row" colspan="5">${body.error || 'Unable to fetch users'}</td></tr>`;
@@ -1285,13 +1291,10 @@ function renderAdminUsers() {
 
 async function modifyAdminUser(uid, action) {
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await getAdminHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/users/${uid}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ action })
     });
     const body = await res.json();
@@ -1308,10 +1311,8 @@ async function modifyAdminUser(uid, action) {
 
 async function loadAdminSettings() {
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/settings`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await getAdminHeaders();
+    const res = await fetch(`${API}/admin/settings`, { headers });
     const body = await res.json();
     if (!res.ok) {
       showToast(body.error || 'Unable to load settings.', 'error');
@@ -1340,13 +1341,10 @@ async function saveAdminSettings() {
   };
 
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await getAdminHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/settings`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
     const body = await res.json();
@@ -1363,10 +1361,8 @@ async function saveAdminSettings() {
 
 async function loadAdminModelStatus() {
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/model`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await getAdminHeaders();
+    const res = await fetch(`${API}/admin/model`, { headers });
     const body = await res.json();
     if (!res.ok) {
       showToast(body.error || 'Unable to load model status.', 'error');
@@ -1383,13 +1379,10 @@ async function loadAdminModelStatus() {
 
 async function adminModelAction(action) {
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await getAdminHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/model/actions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ action })
     });
     const body = await res.json();
@@ -1406,6 +1399,7 @@ async function adminModelAction(action) {
 
 async function handleSignOut() {
   try {
+    localStorage.removeItem('churnsight_admin_token');
     await auth.signOut();
     showToast('Signed out successfully.', 'success');
     // Reload to clear app state for safety

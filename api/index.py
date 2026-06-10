@@ -164,8 +164,20 @@ def require_admin(f):
         has_firebase_config = os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         if not firebase_initialized or not has_firebase_config:
             return f(*args, **kwargs)
+
+        # Parse Firebase ID token if request.user is not yet populated
         if not hasattr(request, 'user') or request.user is None:
-            return jsonify({'error': 'Unauthorized: Admin access required'}), 401
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                token = auth_header.split('Bearer ')[1]
+                try:
+                    decoded_token = auth.verify_id_token(token)
+                    request.user = decoded_token
+                except Exception as e:
+                    return jsonify({'error': f'Unauthorized: Firebase verification failed: {str(e)}'}), 401
+            else:
+                return jsonify({'error': 'Unauthorized: Admin access or token required'}), 401
+
         if not is_admin_token(request.user):
             return jsonify({'error': 'Forbidden: Admin access required'}), 403
         return f(*args, **kwargs)
