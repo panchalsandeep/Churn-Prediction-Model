@@ -43,7 +43,7 @@ except Exception as e:
 
 ADMIN_EMAILS = [email.strip().lower() for email in os.environ.get('ADMIN_EMAILS', '').split(',') if email.strip()]
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Admin@2026!')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 ADMIN_SETTINGS_FILE = os.path.join(BASE_DIR, 'admin_settings.json')
 DEFAULT_ADMIN_SETTINGS = {
     'risk_thresholds': {
