@@ -1909,8 +1909,12 @@ const COHORT_PALETTE = [
 ];
 function buildRetentionCurveChart(cohorts, metric) {
   destroyChart('cohortRetention');
-  const ctx = $('cohortRetentionChart')?.getContext('2d');
-  if (!ctx) return;
+  const cvs = $('cohortRetentionChart');
+  if (!cvs) return;
+  cvs.style.display = 'block';
+  const empty = cvs.parentElement.querySelector('.cohort-empty-msg');
+  if (empty) empty.style.display = 'none';
+  const ctx = cvs.getContext('2d');
 
   const months = ['Month 0','Month 1','Month 2','Month 3','Month 4','Month 5','Month 6'];
   state.charts.cohortRetention = new Chart(ctx, {
@@ -1951,8 +1955,12 @@ function buildRetentionCurveChart(cohorts, metric) {
 /* ── Churn Rate bar chart ───────────────────────────────────── */
 function buildCohortChurnChart(cohorts) {
   destroyChart('cohortChurn');
-  const ctx = $('cohortChurnChart')?.getContext('2d');
-  if (!ctx) return;
+  const cvs = $('cohortChurnChart');
+  if (!cvs) return;
+  cvs.style.display = 'block';
+  const empty = cvs.parentElement.querySelector('.cohort-empty-msg');
+  if (empty) empty.style.display = 'none';
+  const ctx = cvs.getContext('2d');
 
   state.charts.cohortChurn = new Chart(ctx, {
     type: 'bar',
@@ -2013,6 +2021,24 @@ function buildCohortView() {
     if (ins) ins.innerHTML = '<p class="cohort-empty-msg">Train a model to populate cohort insights.</p>';
     destroyChart('cohortRetention');
     destroyChart('cohortChurn');
+    
+    ['cohortRetentionChart', 'cohortChurnChart'].forEach(id => {
+      const cvs = $(id);
+      if (cvs) {
+        cvs.style.display = 'none';
+        let empty = cvs.parentElement.querySelector('.cohort-empty-msg');
+        if (!empty) {
+          empty = document.createElement('div');
+          empty.className = 'cohort-empty-msg';
+          empty.style.textAlign = 'center';
+          empty.style.marginTop = '80px';
+          empty.style.color = 'var(--text-muted)';
+          cvs.parentElement.appendChild(empty);
+        }
+        empty.textContent = 'Train a model first to see chart data.';
+        empty.style.display = 'block';
+      }
+    });
     return;
   }
 
