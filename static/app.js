@@ -1164,15 +1164,27 @@ async function handleForgotPassword() {
 // Wire up forgot password button
 $('forgot-password-btn')?.addEventListener('click', handleForgotPassword);
 
+// Helper: get the admin token stored by the /admin login page
+function getAdminToken() {
+  return localStorage.getItem('churnsight_admin_token') || '';
+}
+
+// Helper: build auth headers for admin API calls
+function adminHeaders(extraHeaders = {}) {
+  const h = { 'Content-Type': 'application/json', ...extraHeaders };
+  const tok = getAdminToken();
+  if (tok) h['X-Admin-Token'] = tok;
+  return h;
+}
+
 async function refreshAdminAccess() {
+  // 1. Try Firebase token (email-based admin)
   if (state.user) {
     try {
       const token = await state.user.getIdToken(true);
       const res = await fetch(`${API}/admin/whoami`, {
         method: 'GET',
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        headers: { Authorization: `Bearer ${token}` }
       });
       const body = await res.json();
       state.admin.isAdmin = body.is_admin === true;
@@ -1182,20 +1194,32 @@ async function refreshAdminAccess() {
       updateAdminNavigation();
       return;
     } catch (err) {
-      // Continue to session-based fallback below
+      // fall through
     }
   }
 
-  try {
-    const res = await fetch(`${API}/admin/session`, { method: 'GET' });
-    const body = await res.json();
-    state.admin.isAdmin = body.is_admin === true;
-    if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
-      loadAdminPanel();
+  // 2. Try localStorage admin token (set by /admin login page)
+  const adminTok = getAdminToken();
+  if (adminTok) {
+    try {
+      const res = await fetch(`${API}/admin/verify-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: adminTok })
+      });
+      const body = await res.json();
+      state.admin.isAdmin = body.is_admin === true;
+      if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
+        loadAdminPanel();
+      }
+      updateAdminNavigation();
+      return;
+    } catch (err) {
+      // fall through
     }
-  } catch (err) {
-    state.admin.isAdmin = false;
   }
+
+  state.admin.isAdmin = false;
   updateAdminNavigation();
 }
 

@@ -12,10 +12,13 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score,
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
-import joblib
 import os
-import json
 import io
+import json
+import pickle
+import hmac
+import hashlib
+import time
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -113,7 +116,43 @@ def is_admin_token(decoded_token):
     return decoded_token.get('admin') is True
 
 
+# ── Stateless admin token (HMAC-signed, works on Vercel serverless) ────────────
+ADMIN_TOKEN_TTL = 8 * 3600  # 8 hours
+
+def _sign(payload: str) -> str:
+    """Return HMAC-SHA256 hex digest of payload using FLASK_SECRET_KEY."""
+    key = app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key
+    return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+def create_admin_token() -> str:
+    """Create a signed token: base64(expires_ts) + '.' + signature."""
+    import base64
+    expires = int(time.time()) + ADMIN_TOKEN_TTL
+    payload = str(expires)
+    sig = _sign(payload)
+    token = base64.urlsafe_b64encode(payload.encode()).decode() + '.' + sig
+    return token
+
+def verify_admin_token(token: str) -> bool:
+    """Return True if token is valid and not expired."""
+    import base64
+    try:
+        b64_payload, sig = token.rsplit('.', 1)
+        payload = base64.urlsafe_b64decode(b64_payload + '==').decode()
+        expires = int(payload)
+        if time.time() > expires:
+            return False
+        expected_sig = _sign(payload)
+        return hmac.compare_digest(sig, expected_sig)
+    except Exception:
+        return False
+
 def is_admin_session():
+    """Check request for a valid admin token (Authorization header or X-Admin-Token)."""
+    token = request.headers.get('X-Admin-Token', '')
+    if token and verify_admin_token(token):
+        return True
+    # Fallback: legacy Flask session (for local dev)
     return session.get('admin_authenticated') is True
 
 def require_admin(f):
@@ -536,8 +575,11 @@ def admin_login():
     if username.lower() != ADMIN_USERNAME.lower() or password != ADMIN_PASSWORD:
         return jsonify({'error': 'Invalid admin credentials'}), 401
 
+    # Issue a stateless signed token (works on Vercel serverless)
+    token = create_admin_token()
+    # Also set legacy session for local dev
     session['admin_authenticated'] = True
-    return jsonify({'status': 'success', 'message': 'Admin session active.'})
+    return jsonify({'status': 'success', 'message': 'Admin session active.', 'token': token})
 
 
 @app.route('/api/admin/logout', methods=['POST'])
@@ -549,6 +591,14 @@ def admin_logout():
 @app.route('/api/admin/session', methods=['GET'])
 def admin_session():
     return jsonify({'is_admin': is_admin_session()})
+
+
+@app.route('/api/admin/verify-token', methods=['POST'])
+def admin_verify_token():
+    """Verify a token sent by the browser."""
+    data = request.get_json() or {}
+    token = data.get('token', '')
+    return jsonify({'is_admin': verify_admin_token(token)})
 
 
 @app.route('/admin', methods=['GET'])
