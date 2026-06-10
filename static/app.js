@@ -226,11 +226,20 @@ $('remove-file').addEventListener('click', () => {
 });
 
 /* ── Algorithm pills ─────────────────────────────────────────── */
+const algoDescriptions = {
+  random_forest: '<p><strong>Random Forest:</strong> An ensemble method that constructs a multitude of decision trees during training. Highly accurate and robust to overfitting.</p>',
+  gradient_boosting: '<p><strong>Gradient Boosting:</strong> A sequential technique where new models are added to correct errors made by previous ones. Excels at finding complex, non-linear patterns.</p>',
+  logistic_regression: '<p><strong>Logistic Regression:</strong> A statistical model that estimates the probability of a binary outcome. Fast, highly interpretable, and serves as an excellent baseline.</p>'
+};
+
 document.querySelectorAll('.algo-pill').forEach(pill => {
   pill.addEventListener('click', () => {
     document.querySelectorAll('.algo-pill').forEach(p => p.classList.remove('active'));
     pill.classList.add('active');
     state.algorithm = pill.dataset.algo;
+    if ($('algo-description')) {
+      $('algo-description').innerHTML = algoDescriptions[state.algorithm] || '';
+    }
   });
 });
 
