@@ -1092,6 +1092,10 @@ function setAuthTab(tab) {
   $('tab-login').classList.toggle('active', tab === 'login');
   $('tab-register').classList.toggle('active', tab === 'register');
 
+  // Show "Forgot password?" only on the login tab
+  const forgotRow = $('forgot-password-row');
+  if (forgotRow) forgotRow.style.display = tab === 'login' ? 'block' : 'none';
+
   if (tab === 'login') {
     $('auth-subtitle').textContent = 'Sign in to access your Churn Prediction Dashboard';
     $('submit-btn-text').textContent = 'Sign In';
@@ -1132,6 +1136,33 @@ async function handleGoogleAuth() {
     showToast(err.message, 'error');
   }
 }
+
+async function handleForgotPassword() {
+  const email = $('auth-email').value.trim();
+  if (!email) {
+    showToast('Please enter your email address first, then click "Forgot your password?".', 'error');
+    $('auth-email').focus();
+    return;
+  }
+  const btn = $('forgot-password-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    await auth.sendPasswordResetEmail(email);
+    showToast(`Password reset email sent to ${email}. Check your inbox!`, 'success');
+  } catch (err) {
+    const msg = err.code === 'auth/user-not-found'
+      ? 'No account found with that email address.'
+      : err.message;
+    showToast(msg, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Forgot your password?';
+  }
+}
+
+// Wire up forgot password button
+$('forgot-password-btn')?.addEventListener('click', handleForgotPassword);
 
 async function refreshAdminAccess() {
   if (state.user) {

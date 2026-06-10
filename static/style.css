@@ -1492,6 +1492,22 @@ canvas { display: block; }
 .btn-google:active {
   transform: translateY(0);
 }
+.forgot-password-link {
+  background: none;
+  border: none;
+  color: #a78bfa;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-family: 'Inter', sans-serif;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+}
+.forgot-password-link:hover {
+  color: #c4b5fd;
+  background: rgba(167,139,250,0.1);
+  text-decoration: underline;
+}
 .google-icon {
   width: 18px;
   height: 18px;
