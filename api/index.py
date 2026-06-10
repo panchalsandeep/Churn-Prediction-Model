@@ -34,13 +34,16 @@ app = Flask(__name__, static_folder=static_dir, static_url_path='')
 app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 CORS(app)
 
-# Initialize Firebase Admin SDK
-# On local dev or if no configurations are set, this will fail gracefully and run in Dev Mode
+# Initialize Firebase Admin SDK safely
 firebase_initialized = False
 try:
-    firebase_admin.initialize_app()
-    firebase_initialized = True
-    print("[INFO] Firebase Admin SDK successfully initialized.")
+    app_instance = firebase_admin.initialize_app()
+    # Ensure it was initialized with a valid project ID (required by Auth service)
+    if app_instance.project_id or os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT'):
+        firebase_initialized = True
+        print(f"[INFO] Firebase Admin SDK successfully initialized.")
+    else:
+        print("[WARNING] Firebase initialized but project_id is empty. Running in Bypass/Local mode for Firebase features.")
 except Exception as e:
     print(f"[WARNING] Firebase Admin SDK initialization failed: {e}. Running in Dev Mode (Bypass Auth).")
 
@@ -163,12 +166,16 @@ def require_admin(f):
 
         has_firebase_config = os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         if not firebase_initialized or not has_firebase_config:
-            return f(*args, **kwargs)
+            # Bypass authentication ONLY if no admin password is set (local guest mode)
+            if not ADMIN_PASSWORD:
+                return f(*args, **kwargs)
 
         # Parse Firebase ID token if request.user is not yet populated
         if not hasattr(request, 'user') or request.user is None:
             auth_header = request.headers.get('Authorization')
             if auth_header and auth_header.startswith('Bearer '):
+                if not firebase_initialized:
+                    return jsonify({'error': 'Unauthorized: Firebase auth is not configured on the backend'}), 401
                 token = auth_header.split('Bearer ')[1]
                 try:
                     decoded_token = auth.verify_id_token(token)
@@ -624,21 +631,28 @@ def admin_page():
 @require_admin
 def admin_list_users():
     if not firebase_initialized:
-        return jsonify({'error': 'Firebase admin SDK unavailable.'}), 501
+        return jsonify({'users': [], 'message': 'Firebase is not initialized (Local Mode)'})
 
-    users = []
-    for user in auth.list_users().iterate_all():
-        provider_ids = [p.provider_id for p in user.provider_data] if user.provider_data else []
-        users.append({
-            'uid': user.uid,
-            'email': user.email,
-            'display_name': user.display_name,
-            'disabled': user.disabled,
-            'provider_ids': provider_ids,
-            'created_at': user.user_metadata.creation_timestamp,
-            'last_sign_in_at': user.user_metadata.last_sign_in_timestamp
+    try:
+        users = []
+        for user in auth.list_users().iterate_all():
+            provider_ids = [p.provider_id for p in user.provider_data] if user.provider_data else []
+            users.append({
+                'uid': user.uid,
+                'email': user.email,
+                'display_name': user.display_name,
+                'disabled': user.disabled,
+                'provider_ids': provider_ids,
+                'created_at': user.user_metadata.creation_timestamp,
+                'last_sign_in_at': user.user_metadata.last_sign_in_timestamp
+            })
+        return jsonify({'users': users})
+    except Exception as e:
+        print(f"[WARNING] Failed to list Firebase users: {e}")
+        return jsonify({
+            'users': [],
+            'message': 'Firebase auth service is not configured or available in this environment.'
         })
-    return jsonify({'users': users})
 
 
 @app.route('/api/admin/users/<uid>', methods=['PATCH'])
@@ -649,14 +663,18 @@ def admin_update_user(uid):
 
     data = request.get_json() or {}
     action = data.get('action')
-    if action == 'disable':
-        auth.update_user(uid, disabled=True)
-    elif action == 'enable':
-        auth.update_user(uid, disabled=False)
-    elif action == 'delete':
-        auth.delete_user(uid)
-    else:
-        return jsonify({'error': 'Invalid action'}), 400
+    try:
+        if action == 'disable':
+            auth.update_user(uid, disabled=True)
+        elif action == 'enable':
+            auth.update_user(uid, disabled=False)
+        elif action == 'delete':
+            auth.delete_user(uid)
+        else:
+            return jsonify({'error': 'Invalid action'}), 400
+    except Exception as e:
+        print(f"[ERROR] Failed to update user {uid}: {e}")
+        return jsonify({'error': f'Failed to perform action: {str(e)}'}), 500
 
     return jsonify({'status': 'success', 'action': action})
 
