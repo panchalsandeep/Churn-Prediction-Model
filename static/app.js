@@ -53,26 +53,91 @@ let state = {
 const $  = id => document.getElementById(id);
 const qs = s  => document.querySelector(s);
 
+/* ── Health Scores State ─────────────────────────────────────── */
+const hsState = {
+  trend    : 'all',
+  risk     : 'all',
+  sort     : 'score_asc',
+  page     : 1,
+  scores   : [],
+  filtered : []
+};
+
+/* ── Alerts & Playbooks State ────────────────────────────────── */
+const alertsState = {
+  tab: 'Open',
+  alerts: {
+    Open: [],
+    Acknowledged: [],
+    Resolved: []
+  },
+  playbooks: [
+    {
+      id: 'pb-retention-booster',
+      name: 'Retention Booster',
+      trigger: 'Health Score < 40 (High Risk)',
+      status: 'Active',
+      steps: [
+        'Send personalized renewal offer with 15% discount',
+        'Schedule CSM customer health check-in call',
+        'Escalate open support tickets'
+      ]
+    },
+    {
+      id: 'pb-engagement-surge',
+      name: 'Engagement Surge',
+      trigger: 'Days since last login > 14 days',
+      status: 'Paused',
+      steps: [
+        'Launch custom automated feature adoption email flow',
+        'Invite user to next premium live product webinar',
+        'Trigger in-app satisfaction survey'
+      ]
+    }
+  ]
+};
+
 /* ══════════════════  NAVIGATION  ═════════════════════════════ */
-const sections = ['upload','overview','analytics','customers','predict','admin'];
+const sections = ['upload','overview','analytics','customers','health','cohort','alerts','predict','admin'];
 const titles   = {
   upload   : 'Upload & Train Model',
   overview : 'Overview Dashboard',
   analytics: 'Analytics & Model Performance',
   customers: 'Customer Risk List',
+  health   : 'Customer Health Scores',
+  cohort   : 'Cohort Analysis',
+  alerts   : 'Alerts & Playbooks',
   predict  : 'Predict Single Customer',
   admin    : 'Admin Console'
 };
 
 function navigateTo(section) {
   sections.forEach(s => {
-    $(`section-${s}`).classList.toggle('active', s === section);
-    $(`nav-${s}`).classList.toggle('active', s === section);
+    const secEl = $(`section-${s}`);
+    if (secEl) secEl.classList.toggle('active', s === section);
+    document.querySelectorAll(`.nav-item[data-section="${s}"]`).forEach(el => {
+      el.classList.toggle('active', s === section);
+    });
   });
   $('page-title').textContent = titles[section];
 
   if (section === 'admin') {
     loadAdminPanel();
+  }
+
+  if (section === 'health') {
+    if (state.modelTrained && !hsState.scores.length) buildHealthScores();
+    applyHsFilters();
+    updateHsKpis();
+    renderHsGrid();
+  }
+
+  if (section === 'cohort') {
+    buildCohortView();
+  }
+
+  if (section === 'alerts') {
+    buildAlertsView();
   }
 
   // Close sidebar on mobile
@@ -89,7 +154,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
       showToast('Admin access is restricted to administrators only.', 'error');
       return;
     }
-    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin') {
+    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin' && sec !== 'health' && sec !== 'cohort' && sec !== 'alerts') {
       showToast('Please upload data and train a model first.', 'error');
       return;
     }
@@ -161,12 +226,90 @@ $('remove-file').addEventListener('click', () => {
 });
 
 /* ── Algorithm pills ─────────────────────────────────────────── */
+const algoDescriptions = {
+  random_forest: `
+<div class="algo-rich">
+  <div class="algo-rich-header">
+    <div class="algo-rich-icon rf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22v-6M8 22v-4M16 22v-5"/><path d="M12 16a4 4 0 0 0 4-4c0-2.5-2-4-4-4s-4 1.5-4 4a4 4 0 0 0 4 4z"/><path d="M8 18a3 3 0 0 0 3-3c0-2-1.5-3-3-3s-3 1-3 3a3 3 0 0 0 3 3z"/><path d="M16 17a3 3 0 0 0 3-3c0-2-1.5-3-3-3s-3 1-3 3a3 3 0 0 0 3 3z"/></svg></div>
+    <div>
+      <h4 class="algo-rich-title">Random Forest</h4>
+      <p class="algo-rich-subtitle">The "Board of Directors" Approach</p>
+    </div>
+  </div>
+  <div class="algo-rich-body">
+    <p style="margin-bottom: 8px;">Imagine asking a "Board of Directors" for their opinion on whether a customer will leave. Instead of relying on one person, the algorithm creates hundreds of independent "decision trees" (directors). Each tree looks at a random subset of the customer's data and casts a vote. The final prediction is simply the majority vote.</p>
+    <p><strong>Why use it?</strong> It is highly accurate, very stable, and extremely resistant to drawing false conclusions (overfitting). It's the best all-rounder.</p>
+  </div>
+  <div class="algo-rich-visual">
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#10b981"><path d="M12 22V12M12 12L8 8M12 12l4-4"/></svg><span>Tree 1<br>(Votes Churn)</span></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#10b981"><path d="M12 22V12M12 12L8 8M12 12l4-4"/></svg><span>Tree 2<br>(Votes Stay)</span></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#10b981"><path d="M12 22V12M12 12L8 8M12 12l4-4"/></svg><span>Tree 3<br>(Votes Churn)</span></div>
+    <div class="algo-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#fff"><rect x="3" y="8" width="18" height="8" rx="2"/></svg><span style="color:#fff; font-weight:bold;">Result: CHURN<br>(2 vs 1)</span></div>
+  </div>
+</div>`,
+
+  gradient_boosting: `
+<div class="algo-rich">
+  <div class="algo-rich-header">
+    <div class="algo-rich-icon gb"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg></div>
+    <div>
+      <h4 class="algo-rich-title">Gradient Boosting</h4>
+      <p class="algo-rich-subtitle">The "Iterative Perfectionist"</p>
+    </div>
+  </div>
+  <div class="algo-rich-body">
+    <p style="margin-bottom: 8px;">Imagine a team working on a complex puzzle. The first person builds a rough version but makes some mistakes. The next person focuses <em>only</em> on fixing those specific mistakes. The third person fixes the remaining mistakes of the second, and so on. Over time, the team creates a near-perfect result.</p>
+    <p><strong>Why use it?</strong> It is incredibly powerful at finding complex, hidden patterns in your data that other algorithms miss. It is often the top-performing model in data science competitions.</p>
+  </div>
+  <div class="algo-rich-visual">
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>Model 1<br>(High Error)</span></div>
+    <div class="algo-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span>Model 2<br>(Fixes Errors)</span></div>
+    <div class="algo-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#fff"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg><span style="color:#fff; font-weight:bold;">Final Model<br>(Low Error)</span></div>
+  </div>
+</div>`,
+
+  logistic_regression: `
+<div class="algo-rich">
+  <div class="algo-rich-header">
+    <div class="algo-rich-icon lr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M3 21l6-14 4 6 8-10"/></svg></div>
+    <div>
+      <h4 class="algo-rich-title">Logistic Regression</h4>
+      <p class="algo-rich-subtitle">The "Weighing Scale"</p>
+    </div>
+  </div>
+  <div class="algo-rich-body">
+    <p style="margin-bottom: 8px;">Imagine a simple weighing scale. It looks at risk factors (like "High Cost" or "Many Support Tickets") and places them on the "Churn" side. It places positive factors (like "Long Tenure") on the "Stay" side. If the scale tips past a certain threshold, it predicts the customer will leave.</p>
+    <p><strong>Why use it?</strong> It is very fast, transparent, and easy to interpret. You can clearly see exactly how much weight it gave to each specific factor.</p>
+  </div>
+  <div class="algo-rich-visual">
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6"><rect x="4" y="10" width="4" height="10" rx="1"/><rect x="16" y="6" width="4" height="14" rx="1"/><path d="M4 14h16"/></svg><span>Risk Weights<br>(Added Up)</span></div>
+    <div class="algo-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="2" x2="12" y2="22"/></svg><span>Threshold<br>(e.g. 50%)</span></div>
+    <div class="algo-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M5 12h14M12 5l7 7-7 7"/></svg></div>
+    <div class="algo-node"><svg viewBox="0 0 24 24" fill="none" stroke="#fff"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg><span style="color:#fff; font-weight:bold;">Probability<br>of Churn</span></div>
+  </div>
+</div>`
+};
+
 document.querySelectorAll('.algo-pill').forEach(pill => {
   pill.addEventListener('click', () => {
     document.querySelectorAll('.algo-pill').forEach(p => p.classList.remove('active'));
     pill.classList.add('active');
     state.algorithm = pill.dataset.algo;
+    if ($('algo-description')) {
+      $('algo-description').innerHTML = algoDescriptions[state.algorithm] || '';
+    }
   });
+});
+
+// Initialize on load
+document.addEventListener('DOMContentLoaded', () => {
+  if ($('algo-description')) {
+    $('algo-description').innerHTML = algoDescriptions[state.algorithm] || '';
+  }
 });
 
 /* ── Train button ────────────────────────────────────────────── */
@@ -266,6 +409,19 @@ function populateDashboard(data) {
   /* Customer table */
   state.filteredCustomers = [...state.allCustomers];
   renderCustomerTable();
+
+  /* Health Scores – build whenever new data arrives */
+  buildHealthScores();
+  applyHsFilters();
+  updateHsKpis();
+  if ($('section-health')?.classList.contains('active')) renderHsGrid();
+
+  /* Alerts & Playbooks – generate on training */
+  generateAlertsFromCustomers();
+  if ($('section-alerts')?.classList.contains('active')) buildAlertsView();
+
+  /* Cohort Analysis – precompute on training */
+  if ($('section-cohort')?.classList.contains('active')) buildCohortView();
 }
 
 /* ══════════════════  CHART BUILDERS  ══════════════════════════ */
@@ -277,7 +433,25 @@ Chart.defaults.color = chartDefaults.color;
 Chart.defaults.font.family = chartDefaults.font.family;
 
 function destroyChart(key) {
-  if (state.charts[key]) { state.charts[key].destroy(); delete state.charts[key]; }
+  if (state.charts[key]) {
+    try {
+      state.charts[key].destroy();
+    } catch (e) {
+      console.warn("Failed to destroy state chart:", key, e);
+    }
+    delete state.charts[key];
+  }
+  const el = $(key);
+  if (el) {
+    const existing = Chart.getChart(el);
+    if (existing) {
+      try {
+        existing.destroy();
+      } catch (e) {
+        console.warn("Failed to destroy existing chart on canvas:", key, e);
+      }
+    }
+  }
 }
 
 /* Trend Chart */
@@ -884,10 +1058,17 @@ function initAuthUI() {
     } else {
       state.user = null;
       state.idToken = null;
-      state.admin.isAdmin = false;
       state.admin.users = [];
       state.admin.settings = null;
       state.admin.modelStatus = null;
+
+      await refreshAdminAccess();
+
+      if (state.admin.isAdmin) {
+        $('user-profile-section').style.display = 'none';
+        updateAdminNavigation();
+        return;
+      }
 
       // Reset and hide Sidebar Profile
       $('user-profile-section').style.display = 'none';
@@ -904,6 +1085,10 @@ function setAuthTab(tab) {
   activeAuthTab = tab;
   $('tab-login').classList.toggle('active', tab === 'login');
   $('tab-register').classList.toggle('active', tab === 'register');
+
+  // Show "Forgot password?" only on the login tab
+  const forgotRow = $('forgot-password-row');
+  if (forgotRow) forgotRow.style.display = tab === 'login' ? 'block' : 'none';
 
   if (tab === 'login') {
     $('auth-subtitle').textContent = 'Sign in to access your Churn Prediction Dashboard';
@@ -946,29 +1131,103 @@ async function handleGoogleAuth() {
   }
 }
 
-async function refreshAdminAccess() {
-  if (!state.user) {
-    state.admin.isAdmin = false;
-    updateAdminNavigation();
+async function handleForgotPassword() {
+  const email = $('auth-email').value.trim();
+  if (!email) {
+    showToast('Please enter your email address first, then click "Forgot your password?".', 'error');
+    $('auth-email').focus();
     return;
   }
-
+  const btn = $('forgot-password-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/whoami`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
-    const body = await res.json();
-    state.admin.isAdmin = body.is_admin === true;
-    if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
-      loadAdminPanel();
-    }
+    await auth.sendPasswordResetEmail(email);
+    showToast(`Password reset email sent to ${email}. Check your inbox!`, 'success');
   } catch (err) {
-    state.admin.isAdmin = false;
+    const msg = err.code === 'auth/user-not-found'
+      ? 'No account found with that email address.'
+      : err.message;
+    showToast(msg, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Forgot your password?';
   }
+}
+
+// Wire up forgot password button
+$('forgot-password-btn')?.addEventListener('click', handleForgotPassword);
+
+// Helper: get the admin token stored by the /admin login page
+function getAdminToken() {
+  return localStorage.getItem('churnsight_admin_token') || '';
+}
+
+// Helper: build auth headers for admin API calls (handling both HMAC and Firebase token)
+async function getAdminHeaders(extraHeaders = {}) {
+  const h = { ...extraHeaders };
+  const tok = getAdminToken();
+  if (tok) {
+    h['X-Admin-Token'] = tok;
+  }
+  if (state.user) {
+    try {
+      const firebaseToken = await state.user.getIdToken();
+      h['Authorization'] = `Bearer ${firebaseToken}`;
+    } catch (err) {
+      console.warn('Failed to get Firebase ID token:', err);
+    }
+  }
+  return h;
+}
+
+async function refreshAdminAccess() {
+  // 1. Try Firebase token (email-based admin)
+  if (state.user) {
+    try {
+      const token = await state.user.getIdToken(true);
+      const res = await fetch(`${API}/admin/whoami`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const body = await res.json();
+      if (body.is_admin === true) {
+        state.admin.isAdmin = true;
+        if ($('section-admin').classList.contains('active')) {
+          loadAdminPanel();
+        }
+        updateAdminNavigation();
+        return;
+      }
+    } catch (err) {
+      console.warn('Firebase admin check failed:', err);
+    }
+  }
+
+  // 2. Try localStorage admin token (set by /admin login page)
+  const adminTok = getAdminToken();
+  if (adminTok) {
+    try {
+      const res = await fetch(`${API}/admin/verify-token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: adminTok })
+      });
+      const body = await res.json();
+      if (body.is_admin === true) {
+        state.admin.isAdmin = true;
+        if ($('section-admin').classList.contains('active')) {
+          loadAdminPanel();
+        }
+        updateAdminNavigation();
+        return;
+      }
+    } catch (err) {
+      console.warn('Local admin token verification failed:', err);
+    }
+  }
+
+  state.admin.isAdmin = false;
   updateAdminNavigation();
 }
 
@@ -985,10 +1244,8 @@ async function loadAdminUsers() {
   const list = $('admin-user-list');
   list.innerHTML = '<tr><td class="empty-row" colspan="5">Loading users…</td></tr>';
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/users`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await getAdminHeaders();
+    const res = await fetch(`${API}/admin/users`, { headers });
     const body = await res.json();
     if (!res.ok) {
       list.innerHTML = `<tr><td class="empty-row" colspan="5">${body.error || 'Unable to fetch users'}</td></tr>`;
@@ -1034,13 +1291,10 @@ function renderAdminUsers() {
 
 async function modifyAdminUser(uid, action) {
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await getAdminHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/users/${uid}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ action })
     });
     const body = await res.json();
@@ -1057,10 +1311,8 @@ async function modifyAdminUser(uid, action) {
 
 async function loadAdminSettings() {
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/settings`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await getAdminHeaders();
+    const res = await fetch(`${API}/admin/settings`, { headers });
     const body = await res.json();
     if (!res.ok) {
       showToast(body.error || 'Unable to load settings.', 'error');
@@ -1089,13 +1341,10 @@ async function saveAdminSettings() {
   };
 
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await getAdminHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/settings`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
     const body = await res.json();
@@ -1112,10 +1361,8 @@ async function saveAdminSettings() {
 
 async function loadAdminModelStatus() {
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/model`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await getAdminHeaders();
+    const res = await fetch(`${API}/admin/model`, { headers });
     const body = await res.json();
     if (!res.ok) {
       showToast(body.error || 'Unable to load model status.', 'error');
@@ -1132,13 +1379,10 @@ async function loadAdminModelStatus() {
 
 async function adminModelAction(action) {
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await getAdminHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/model/actions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ action })
     });
     const body = await res.json();
@@ -1155,6 +1399,7 @@ async function adminModelAction(action) {
 
 async function handleSignOut() {
   try {
+    localStorage.removeItem('churnsight_admin_token');
     await auth.signOut();
     showToast('Signed out successfully.', 'success');
     // Reload to clear app state for safety
@@ -1179,6 +1424,1051 @@ $('admin-user-table')?.addEventListener('click', e => {
     modifyAdminUser(uid, action);
   }
 });
+
+/* ══════════════════  HEALTH SCORES  ══════════════════════════ */
+const HS_PAGE_SIZE = 9;
+
+/* ── Score formula ──────────────────────────────────────────── */
+function computeHealthScore(c) {
+  // Each component 0-100; total is weighted mean
+  const tenureScore    = Math.min(100, (c.tenure / 36) * 100);          // 0–36 months → 0-100
+  const engageScore    = Math.min(100, (c.logins ?? 10) / 25 * 100);    // logins last 30 days
+  const supportScore   = Math.max(0, 100 - (c.support ?? 0) * 18);      // fewer tickets = better
+  const spendScore     = Math.min(100, (c.monthly ?? 50) / 120 * 100);  // spend up to $120
+  const loyaltyScore   = Math.max(0, 100 - (c.last_login ?? 5) * 3);   // days since login
+
+  // Weight: Tenure 25% | Engagement 25% | Support 20% | Spend 15% | Loyalty 15%
+  const total = (tenureScore * 0.25) + (engageScore * 0.25) +
+                (supportScore * 0.20) + (spendScore * 0.15) +
+                (loyaltyScore * 0.15);
+
+  // Churn probability subtracts up to 30 pts
+  const churnPenalty = (c.churn_prob / 100) * 30;
+  const final = Math.max(0, Math.min(100, total - churnPenalty));
+
+  return {
+    total       : Math.round(final),
+    tenure      : Math.round(tenureScore),
+    engagement  : Math.round(engageScore),
+    support     : Math.round(supportScore),
+    spend       : Math.round(spendScore),
+    loyalty     : Math.round(loyaltyScore)
+  };
+}
+
+function deriveTrend(c) {
+  // Derive a pseudo-trend from tenure + support signals
+  if (c.tenure >= 18 && (c.support ?? 0) <= 1 && c.churn_prob < 35) return 'improving';
+  if (c.churn_prob > 60 || (c.support ?? 0) >= 4) return 'declining';
+  return 'stable';
+}
+
+function buildDragDown(score) {
+  const reasons = [];
+  if (score.support < 40) reasons.push('High support ticket volume dragging health down');
+  if (score.loyalty < 40) reasons.push('Extended inactivity reducing loyalty score');
+  if (score.engagement < 30) reasons.push('Low login frequency signals disengagement');
+  if (score.tenure < 25)   reasons.push('Short customer tenure adds uncertainty');
+  return reasons[0] || null;
+}
+
+function buildRecs(c) {
+  const recs = [];
+  if (c.churn_prob >= 70)  recs.push('Schedule urgent executive business review');
+  if (c.support >= 4)      recs.push('Escalate open tickets and assign a dedicated CSM');
+  if (c.last_login >= 14)  recs.push('Send personalised re-engagement campaign');
+  if (c.tenure <= 3)       recs.push('Enrol in onboarding success programme');
+  if (c.monthly <= 30)     recs.push('Offer upsell / expansion conversation');
+  if (recs.length === 0)   recs.push('Continue standard success check-in cadence');
+  return recs.slice(0, 3);
+}
+
+/* ── Compute all scores once training completes ─────────────── */
+function buildHealthScores() {
+  hsState.scores = state.allCustomers.map(c => {
+    const score = computeHealthScore(c);
+    return {
+      id        : c.id,
+      score     : score.total,
+      components: score,
+      trend     : deriveTrend(c),
+      risk      : c.risk_level,
+      churn_prob: c.churn_prob,
+      tenure    : c.tenure,
+      monthly   : c.monthly,
+      support   : c.support,
+      last_login: c.last_login,
+      logins    : c.logins,
+      actual    : c.actual,
+      recs      : buildRecs(c),
+      dragDown  : buildDragDown(score)
+    };
+  });
+}
+
+/* ── Filter + Sort ──────────────────────────────────────────── */
+function applyHsFilters() {
+  let data = [...hsState.scores];
+  if (hsState.risk !== 'all')  data = data.filter(c => c.risk === hsState.risk);
+  if (hsState.trend !== 'all') data = data.filter(c => c.trend === hsState.trend);
+
+  switch (hsState.sort) {
+    case 'score_asc':   data.sort((a, b) => a.score - b.score); break;
+    case 'score_desc':  data.sort((a, b) => b.score - a.score); break;
+    case 'prob_desc':   data.sort((a, b) => b.churn_prob - a.churn_prob); break;
+    case 'tenure_desc': data.sort((a, b) => b.tenure - a.tenure); break;
+  }
+  hsState.filtered = data;
+  hsState.page = 1;
+}
+
+/* ── KPI summary strip ──────────────────────────────────────── */
+function updateHsKpis() {
+  const data = hsState.filtered;
+  if (!data.length) {
+    ['hs-kpi-avg','hs-kpi-critical','hs-kpi-at-risk','hs-kpi-healthy','hs-kpi-improving']
+      .forEach(id => { if ($(id)) $(id).textContent = '–'; });
+    return;
+  }
+  const avg       = Math.round(data.reduce((s, c) => s + c.score, 0) / data.length);
+  const critical  = data.filter(c => c.score < 40).length;
+  const atRisk    = data.filter(c => c.score >= 40 && c.score <= 65).length;
+  const healthy   = data.filter(c => c.score > 65).length;
+  const improving = data.filter(c => c.trend === 'improving').length;
+
+  $('hs-kpi-avg').textContent       = avg;
+  $('hs-kpi-critical').textContent  = critical;
+  $('hs-kpi-at-risk').textContent   = atRisk;
+  $('hs-kpi-healthy').textContent   = healthy;
+  $('hs-kpi-improving').textContent = improving;
+}
+
+/* ── Score ring mini-chart ──────────────────────────────────── */
+function drawHsRing(canvas, score) {
+  if (!canvas) return;
+  // Destroy any previous Chart.js instance on this canvas
+  const existing = Chart.getChart(canvas);
+  if (existing) existing.destroy();
+
+  const color = score >= 66 ? '#34d399' : score >= 40 ? '#fb923c' : '#f87171';
+  new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      datasets: [{
+        data: [score, 100 - score],
+        backgroundColor: [color, 'rgba(255,255,255,0.05)'],
+        borderWidth: 0,
+        hoverOffset: 0
+      }]
+    },
+    options: {
+      responsive: false,
+      cutout: '76%',
+      animation: { animateRotate: true, duration: 700 },
+      plugins: { legend: { display: false }, tooltip: { enabled: false } }
+    }
+  });
+}
+
+/* ── Trend icon HTML ────────────────────────────────────────── */
+function trendIcon(trend) {
+  if (trend === 'improving')
+    return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 11 7 5 11 9 14 6"/></svg>`;
+  if (trend === 'declining')
+    return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 5 7 11 11 7 14 10"/></svg>`;
+  return `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="2" y1="8" x2="14" y2="8"/></svg>`;
+}
+
+/* ── Render one health card ─────────────────────────────────── */
+function renderHsCard(c) {
+  const { components: sc } = c;
+  const comps = [
+    { label: 'Tenure',      val: sc.tenure },
+    { label: 'Engagement',  val: sc.engagement },
+    { label: 'Support',     val: sc.support },
+    { label: 'Spend',       val: sc.spend },
+    { label: 'Loyalty',     val: sc.loyalty }
+  ];
+  const fillColor = c.score >= 66 ? '#34d399' : c.score >= 40 ? '#fb923c' : '#f87171';
+  const canvasId = `hs-ring-${c.id.replace(/\s+/g,'_')}`;
+
+  const dragHtml = c.dragDown
+    ? `<div class="hs-drag-down">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        ${c.dragDown}
+      </div>`
+    : '';
+
+  const recsHtml = c.recs.map(r => `<li>${r}</li>`).join('');
+
+  const metaItems = [
+    { label: 'Monthly Spend', val: `$${(c.monthly||0).toFixed(0)}` },
+    { label: 'Support Tickets', val: c.support ?? 0 },
+    { label: 'Last Login',      val: `${c.last_login ?? 0} days ago` },
+    { label: 'Actual Churn',    val: c.actual === 1 ? '● Churned' : '● Retained' }
+  ];
+
+  return `
+    <div class="hs-card tier-${c.risk}" data-id="${c.id}" id="hsc-${c.id.replace(/\s+/g,'_')}">
+      <!-- Header -->
+      <div class="hs-card-header">
+        <span class="hs-card-id">${c.id}</span>
+        <div class="hs-card-badges">
+          <span class="hs-tier-badge ${c.risk}">${c.risk}</span>
+          <span class="hs-trend-badge ${c.trend}">${trendIcon(c.trend)} ${c.trend.charAt(0).toUpperCase()+c.trend.slice(1)}</span>
+        </div>
+      </div>
+
+      <!-- Score Ring -->
+      <div class="hs-score-row">
+        <div class="hs-score-ring">
+          <canvas id="${canvasId}" width="72" height="72"></canvas>
+          <div class="hs-score-label">
+            <span class="hs-score-num">${c.score}</span>
+            <span class="hs-score-sub">score</span>
+          </div>
+        </div>
+        <div class="hs-score-meta">
+          <div class="hs-score-churn"><strong>${c.churn_prob}%</strong> churn prob.</div>
+          <div class="hs-score-tenure">Tenure: ${c.tenure} mo</div>
+        </div>
+      </div>
+
+      <!-- Component bars -->
+      <div class="hs-components">
+        ${comps.map(comp => `
+          <div class="hs-comp-row">
+            <div class="hs-comp-header"><span>${comp.label}</span><span>${comp.val}</span></div>
+            <div class="hs-comp-bar">
+              <div class="hs-comp-fill" style="width:${comp.val}%; background:${comp.val >= 60 ? '#34d399' : comp.val >= 35 ? '#fb923c' : '#f87171'};"></div>
+            </div>
+          </div>`).join('')}
+      </div>
+
+      ${dragHtml}
+
+      <!-- Expand toggle -->
+      <button class="hs-card-expand-btn" aria-expanded="false">
+        View CSM Actions
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+
+      <!-- Expandable detail -->
+      <div class="hs-card-detail">
+        <p class="hs-detail-title">Recommended Actions</p>
+        <ul class="hs-detail-recs">${recsHtml}</ul>
+        <p class="hs-detail-title">Customer Snapshot</p>
+        <div class="hs-detail-meta">
+          ${metaItems.map(m => `
+            <div class="hs-detail-meta-item">
+              <strong>${m.val}</strong>${m.label}
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`;
+}
+
+/* ── Render the full grid ───────────────────────────────────── */
+function renderHsGrid() {
+  const grid = $('hs-card-grid');
+  if (!grid) return;
+
+  if (!state.modelTrained) {
+    grid.innerHTML = `<div class="hs-empty">
+      <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="rgba(99,102,241,0.08)"/><path d="M22 32 L28 38 L42 24" stroke="#818cf8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <p>Train a model first to see customer health scores.</p>
+    </div>`;
+    $('hs-pagination').innerHTML = '';
+    return;
+  }
+
+  const data  = hsState.filtered;
+  const pages = Math.ceil(data.length / HS_PAGE_SIZE);
+  const start = (hsState.page - 1) * HS_PAGE_SIZE;
+  const paged = data.slice(start, start + HS_PAGE_SIZE);
+
+  if (paged.length === 0) {
+    grid.innerHTML = `<div class="hs-empty">
+      <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="rgba(99,102,241,0.08)"/><line x1="20" y1="32" x2="44" y2="32" stroke="#818cf8" stroke-width="3" stroke-linecap="round"/></svg>
+      <p>No customers match these filters.</p>
+    </div>`;
+    $('hs-pagination').innerHTML = '';
+    return;
+  }
+
+  grid.innerHTML = paged.map(renderHsCard).join('');
+
+  // Draw rings after DOM insert
+  requestAnimationFrame(() => {
+    paged.forEach(c => {
+      const canvasId = `hs-ring-${c.id.replace(/\s+/g,'_')}`;
+      const canvas   = document.getElementById(canvasId);
+      if (canvas) drawHsRing(canvas, c.score);
+    });
+  });
+
+  // Expand/collapse cards
+  grid.querySelectorAll('.hs-card-expand-btn').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const card = btn.closest('.hs-card');
+      const isExp = card.classList.toggle('expanded');
+      btn.setAttribute('aria-expanded', isExp);
+    });
+  });
+
+  // Whole card click also toggles (but ignore if click was inside details panel)
+  grid.querySelectorAll('.hs-card').forEach(card => {
+    card.addEventListener('click', e => {
+      if (e.target.closest('.hs-card-detail')) {
+        return;
+      }
+      const isExp = card.classList.toggle('expanded');
+      const btn   = card.querySelector('.hs-card-expand-btn');
+      if (btn) btn.setAttribute('aria-expanded', isExp);
+    });
+  });
+
+  renderHsPagination(pages);
+}
+
+/* ── Pagination ─────────────────────────────────────────────── */
+function renderHsPagination(pages) {
+  const wrap = $('hs-pagination');
+  if (!wrap || pages <= 1) { if (wrap) wrap.innerHTML = ''; return; }
+
+  let html = `<button class="page-btn" ${hsState.page===1?'disabled':''} data-hp="${hsState.page-1}">‹ Prev</button>`;
+  for (let i = 1; i <= pages; i++) {
+    if (pages > 7 && i > 3 && i < pages - 1 && Math.abs(i - hsState.page) > 1) {
+      if (i === 4) html += '<span style="color:var(--text-3);padding:0 4px">…</span>';
+      continue;
+    }
+    html += `<button class="page-btn ${i===hsState.page?'active':''}" data-hp="${i}">${i}</button>`;
+  }
+  html += `<button class="page-btn" ${hsState.page===pages?'disabled':''} data-hp="${hsState.page+1}">Next ›</button>`;
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll('.page-btn[data-hp]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      hsState.page = parseInt(btn.dataset.hp);
+      renderHsGrid();
+    });
+  });
+}
+
+/* ── Full refresh ───────────────────────────────────────────── */
+function refreshHealthView() {
+  if (!state.modelTrained || !hsState.scores.length) return;
+  applyHsFilters();
+  updateHsKpis();
+  renderHsGrid();
+}
+
+/* ── Wire up filters ────────────────────────────────────────── */
+document.querySelectorAll('#hs-trend-filters .hs-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#hs-trend-filters .hs-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    hsState.trend = btn.dataset.trend;
+    refreshHealthView();
+  });
+});
+document.querySelectorAll('#hs-risk-filters .hs-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#hs-risk-filters .hs-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    hsState.risk = btn.dataset.risk;
+    refreshHealthView();
+  });
+});
+$('hs-sort')?.addEventListener('change', () => {
+  hsState.sort = $('hs-sort').value;
+  refreshHealthView();
+});
+
+/* ══════════════════  COHORT ANALYSIS (Phase 3)  ═══════════════ */
+
+/* ── Segmentation helpers ───────────────────────────────────── */
+function getCohortKey(c, seg) {
+  switch (seg) {
+    case 'contract':
+      return c.contract_type || 'Unknown';
+    case 'tenure':
+      if (c.tenure <= 3)  return '0–3 mo';
+      if (c.tenure <= 12) return '4–12 mo';
+      if (c.tenure <= 24) return '13–24 mo';
+      return '24+ mo';
+    case 'risk':
+      return c.risk_level || 'Unknown';
+    case 'spend':
+      if ((c.monthly || 0) < 40)  return '<$40';
+      if ((c.monthly || 0) < 70)  return '$40–70';
+      if ((c.monthly || 0) < 100) return '$70–100';
+      return '$100+';
+    default:
+      return 'All';
+  }
+}
+
+/* Simulate 6-month retention cohort data from customer snapshot */
+function simulateRetentionCurve(customers) {
+  // Month 0 = 100%; subsequent months derive from churn probability
+  const months = [0, 1, 2, 3, 4, 5, 6];
+  const avgChurnProb = customers.reduce((s, c) => s + (c.churn_prob / 100), 0) / (customers.length || 1);
+  return months.map(m => {
+    const retained = Math.max(5, Math.round(100 * Math.pow(1 - avgChurnProb * 0.4, m)));
+    return retained;
+  });
+}
+
+/* ── Segment computation ────────────────────────────────────── */
+function computeCohorts(seg) {
+  const groups = {};
+  state.allCustomers.forEach(c => {
+    const key = getCohortKey(c, seg);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(c);
+  });
+
+  return Object.entries(groups).map(([name, customers]) => {
+    const total       = customers.length;
+    const churnCount  = customers.filter(c => c.actual === 1).length;
+    const churnRate   = total ? Math.round((churnCount / total) * 100) : 0;
+    const retention   = 100 - churnRate;
+    const avgChurnProb = Math.round(customers.reduce((s, c) => s + c.churn_prob, 0) / (total || 1));
+    const avgTenure   = Math.round(customers.reduce((s, c) => s + (c.tenure || 0), 0) / (total || 1));
+    const highRisk    = customers.filter(c => c.risk_level === 'High').length;
+    const curve       = simulateRetentionCurve(customers);
+    return { name, total, churnCount, churnRate, retention, avgChurnProb, avgTenure, highRisk, curve, customers };
+  }).sort((a, b) => b.retention - a.retention);
+}
+
+/* ── Colour helpers ─────────────────────────────────────────── */
+function retentionColor(pct) {
+  // Green (high) → Yellow → Red (low)
+  if (pct >= 80) return { bg: 'rgba(52,211,153,0.75)',  text: '#fff' };
+  if (pct >= 65) return { bg: 'rgba(52,211,153,0.45)',  text: '#e2e8f0' };
+  if (pct >= 50) return { bg: 'rgba(251,191,36,0.55)',  text: '#fff' };
+  if (pct >= 35) return { bg: 'rgba(251,146,60,0.65)',  text: '#fff' };
+  return             { bg: 'rgba(248,113,113,0.75)',  text: '#fff' };
+}
+
+/* ── Heatmap ────────────────────────────────────────────────── */
+function buildHeatmap(cohorts, metric) {
+  const wrap = $('cohort-heatmap');
+  if (!wrap) return;
+
+  const months = ['M0', 'M1', 'M2', 'M3', 'M4', 'M5', 'M6'];
+
+  // Header row
+  let html = `<div class="ch-table">`;
+
+  // Column headers
+  html += `<div class="ch-row ch-header-row">
+    <div class="ch-cell ch-label-cell">Segment</div>
+    <div class="ch-cell ch-label-cell">Customers</div>
+    ${months.map(m => `<div class="ch-cell ch-month-cell">${m}</div>`).join('')}
+    <div class="ch-cell ch-label-cell">Avg Churn%</div>
+  </div>`;
+
+  cohorts.forEach((coh, idx) => {
+    const values = metric === 'churn'
+      ? coh.curve.map(v => 100 - v)
+      : coh.curve;
+
+    html += `<div class="ch-row" data-cohort="${idx}">
+      <div class="ch-cell ch-name-cell" title="${coh.name}">${coh.name}</div>
+      <div class="ch-cell ch-count-cell">${coh.total}</div>
+      ${values.map((val, mi) => {
+        const { bg, text } = metric === 'churn'
+          ? { bg: retentionColor(100 - val).bg, text: retentionColor(100 - val).text }
+          : retentionColor(val);
+        return `<div class="ch-cell ch-val-cell" style="background:${bg};color:${text}" title="${coh.name} ${months[mi]}: ${val}%">${val}%</div>`;
+      }).join('')}
+      <div class="ch-cell ch-avg-cell">${coh.avgChurnProb}%</div>
+    </div>`;
+  });
+
+  html += `</div>`;
+  wrap.innerHTML = html;
+
+  // Click row to highlight
+  wrap.querySelectorAll('.ch-row[data-cohort]').forEach(row => {
+    row.addEventListener('click', () => {
+      wrap.querySelectorAll('.ch-row').forEach(r => r.classList.remove('ch-selected'));
+      row.classList.toggle('ch-selected');
+    });
+  });
+
+  $('cohort-heatmap-sub').textContent = `${cohorts.length} segments × 7 months — ${metric === 'churn' ? 'Churn' : 'Retention'} rates`;
+}
+
+/* ── Segment Insights panel ─────────────────────────────────── */
+function buildInsights(cohorts) {
+  const el = $('cohort-insights');
+  if (!el || !cohorts.length) return;
+
+  const best  = cohorts[0];
+  const worst = cohorts[cohorts.length - 1];
+
+  const rows = cohorts.map((coh, i) => `
+    <div class="cohort-insight-row" style="animation-delay:${i * 50}ms">
+      <div class="cir-name">${coh.name}</div>
+      <div class="cir-bar-wrap">
+        <div class="cir-bar" style="width:${coh.retention}%; background:${coh.retention>=65?'#34d399':coh.retention>=40?'#fb923c':'#f87171'}"></div>
+      </div>
+      <div class="cir-stats">
+        <span class="${coh.retention>=65?'green':coh.retention>=40?'orange':'red'}">${coh.retention}% ret.</span>
+        <span class="dim">${coh.total} cust</span>
+      </div>
+    </div>`).join('');
+
+  el.innerHTML = `
+    <div class="ci-badges">
+      <div class="ci-badge green">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="2 10 6 6 10 8 14 4"/></svg>
+        Best: <strong>${best.name}</strong> (${best.retention}% ret.)
+      </div>
+      <div class="ci-badge red">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="2 4 6 8 10 6 14 10"/></svg>
+        Worst: <strong>${worst.name}</strong> (${worst.retention}% ret.)
+      </div>
+    </div>
+    <div class="cohort-insight-rows">${rows}</div>`;
+}
+
+/* ── KPI strip ──────────────────────────────────────────────── */
+function updateCohortKpis(cohorts) {
+  if (!cohorts.length) return;
+  const best    = cohorts[0];
+  const worst   = cohorts[cohorts.length - 1];
+  const avgTen  = Math.round(cohorts.reduce((s, c) => s + c.avgTenure, 0) / cohorts.length);
+  const total   = cohorts.reduce((s, c) => s + c.total, 0);
+
+  $('cohort-kpi-segments').textContent  = cohorts.length;
+  $('cohort-kpi-best-ret').textContent  = best.retention + '%';
+  $('cohort-kpi-worst-ret').textContent = worst.retention + '%';
+  $('cohort-kpi-avg-tenure').textContent = avgTen;
+  $('cohort-kpi-total').textContent     = total;
+}
+
+/* ── Retention Curve chart ──────────────────────────────────── */
+const COHORT_PALETTE = [
+  '#818cf8','#34d399','#f87171','#fb923c','#fbbf24','#60a5fa','#a78bfa','#22d3ee'
+];
+function buildRetentionCurveChart(cohorts, metric) {
+  destroyChart('cohortRetention');
+  const cvs = $('cohortRetentionChart');
+  if (!cvs) return;
+  cvs.style.display = 'block';
+  const empty = cvs.parentElement.querySelector('.cohort-empty-msg');
+  if (empty) empty.style.display = 'none';
+  const ctx = cvs.getContext('2d');
+
+  const months = ['Month 0','Month 1','Month 2','Month 3','Month 4','Month 5','Month 6'];
+  state.charts.cohortRetention = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: months,
+      datasets: cohorts.map((coh, i) => ({
+        label: coh.name,
+        data: metric === 'churn' ? coh.curve.map(v => 100 - v) : coh.curve,
+        borderColor: COHORT_PALETTE[i % COHORT_PALETTE.length],
+        backgroundColor: 'transparent',
+        tension: 0.4,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        borderWidth: 2.5
+      }))
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10, padding: 16 } },
+        tooltip: tooltipStyle()
+      },
+      scales: {
+        x: gridStyle(),
+        y: {
+          ...gridStyle(),
+          min: 0, max: 100,
+          ticks: { callback: v => v + '%' },
+          title: { display: true, text: metric === 'churn' ? 'Churn Rate (%)' : 'Retention Rate (%)', color: '#64748b' }
+        }
+      }
+    }
+  });
+}
+
+/* ── Churn Rate bar chart ───────────────────────────────────── */
+function buildCohortChurnChart(cohorts) {
+  destroyChart('cohortChurn');
+  const cvs = $('cohortChurnChart');
+  if (!cvs) return;
+  cvs.style.display = 'block';
+  const empty = cvs.parentElement.querySelector('.cohort-empty-msg');
+  if (empty) empty.style.display = 'none';
+  const ctx = cvs.getContext('2d');
+
+  state.charts.cohortChurn = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: cohorts.map(c => c.name),
+      datasets: [
+        {
+          label: 'Churn Rate %',
+          data: cohorts.map(c => c.churnRate),
+          backgroundColor: cohorts.map(c =>
+            c.churnRate > 50 ? 'rgba(248,113,113,0.7)' :
+            c.churnRate > 30 ? 'rgba(251,146,60,0.7)' :
+            'rgba(52,211,153,0.7)'
+          ),
+          borderRadius: 6,
+          borderSkipped: false
+        },
+        {
+          label: 'High Risk Count',
+          data: cohorts.map(c => Math.round((c.highRisk / c.total) * 100)),
+          backgroundColor: 'rgba(129,140,248,0.25)',
+          borderColor: '#818cf8',
+          borderWidth: 1.5,
+          borderRadius: 6,
+          type: 'bar'
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { usePointStyle: true, padding: 14 } },
+        tooltip: tooltipStyle()
+      },
+      scales: {
+        x: gridStyle(),
+        y: {
+          ...gridStyle(),
+          min: 0, max: 100,
+          ticks: { callback: v => v + '%' },
+          title: { display: true, text: 'Percentage (%)', color: '#64748b' }
+        }
+      }
+    }
+  });
+}
+
+/* ── Master build ───────────────────────────────────────────── */
+function buildCohortView() {
+  const seg    = $('cohort-seg')?.value    || 'contract';
+  const metric = $('cohort-metric')?.value || 'retention';
+
+  if (!state.modelTrained || !state.allCustomers.length) {
+    const wrap = $('cohort-heatmap');
+    if (wrap) wrap.innerHTML = '<div class="cohort-heatmap-empty">Train a model first to see cohort data.</div>';
+    const ins = $('cohort-insights');
+    if (ins) ins.innerHTML = '<p class="cohort-empty-msg">Train a model to populate cohort insights.</p>';
+    destroyChart('cohortRetention');
+    destroyChart('cohortChurn');
+    
+    ['cohortRetentionChart', 'cohortChurnChart'].forEach(id => {
+      const cvs = $(id);
+      if (cvs) {
+        cvs.style.display = 'none';
+        let empty = cvs.parentElement.querySelector('.cohort-empty-msg');
+        if (!empty) {
+          empty = document.createElement('div');
+          empty.className = 'cohort-empty-msg';
+          empty.style.textAlign = 'center';
+          empty.style.marginTop = '80px';
+          empty.style.color = 'var(--text-muted)';
+          cvs.parentElement.appendChild(empty);
+        }
+        empty.textContent = 'Train a model first to see chart data.';
+        empty.style.display = 'block';
+      }
+    });
+    return;
+  }
+
+  const cohorts = computeCohorts(seg);
+  updateCohortKpis(cohorts);
+  buildHeatmap(cohorts, metric);
+  buildInsights(cohorts);
+  buildRetentionCurveChart(cohorts, metric);
+  buildCohortChurnChart(cohorts);
+}
+
+/* ── Event bindings ─────────────────────────────────────────── */
+$('cohort-seg')?.addEventListener('change', buildCohortView);
+$('cohort-metric')?.addEventListener('change', buildCohortView);
+$('cohort-refresh-btn')?.addEventListener('click', buildCohortView);
+
+/* ══════════════════  ALERTS & PLAYBOOKS (Phase 4)  ═══════════ */
+
+/* ── Dynamic Alert Generator from Customer Database ─────────── */
+function generateAlertsFromCustomers() {
+  if (!state.modelTrained || !state.allCustomers.length) {
+    alertsState.alerts.Open = [];
+    alertsState.alerts.Acknowledged = [];
+    alertsState.alerts.Resolved = [];
+    updateAlertTabsCount();
+    return;
+  }
+
+  const openList = [];
+  const ackList = [];
+  const resList = [];
+
+  state.allCustomers.forEach((c, idx) => {
+    // Generate signals based on features
+    const signals = [];
+    if (c.support >= 3) signals.push('Support Spike');
+    if (c.last_login >= 14) signals.push('Extended Inactivity');
+    if (c.logins < 5) signals.push('Login Drop');
+    if (c.monthly > 100) signals.push('High ARR Account');
+    if (signals.length === 0) signals.push('High Risk Score');
+
+    // Severity mapping
+    let severity = 'Info';
+    if (c.churn_prob >= 75 || signals.length >= 3) severity = 'High';
+    else if (c.churn_prob >= 40 || signals.length >= 2) severity = 'Medium';
+
+    const alertItem = {
+      id: `alt-${c.id}`,
+      customer: c.id,
+      severity: severity,
+      title: c.churn_prob >= 75 ? 'Critical Churn Probability' : 'Risk Signals Detected',
+      signals: signals,
+      time: `${idx + 1}h ago`,
+      details: `Customer ${c.id} has a churn probability of ${c.churn_prob}% with support ticket count of ${c.support}.`,
+      csm: 'Unassigned',
+      outcome: null
+    };
+
+    // Distribute among lists for demonstration
+    if (c.risk_level === 'High') {
+      openList.push(alertItem);
+    } else if (c.risk_level === 'Medium') {
+      alertItem.csm = 'CSM Member';
+      ackList.push(alertItem);
+    } else if (idx === 0) {
+      alertItem.outcome = 'Retained';
+      resList.push(alertItem);
+    }
+  });
+
+  alertsState.alerts.Open = openList;
+  alertsState.alerts.Acknowledged = ackList;
+  alertsState.alerts.Resolved = resList;
+  updateAlertTabsCount();
+}
+
+function updateAlertTabsCount() {
+  const openCount = alertsState.alerts.Open.length;
+  const ackCount = alertsState.alerts.Acknowledged.length;
+  const resCount = alertsState.alerts.Resolved.length;
+
+  if ($('count-open')) $('count-open').textContent = openCount;
+  if ($('count-acknowledged')) $('count-acknowledged').textContent = ackCount;
+  if ($('count-resolved')) $('count-resolved').textContent = resCount;
+}
+
+/* ── Build Alerts View ──────────────────────────────────────── */
+function buildAlertsView() {
+  const tab = alertsState.tab;
+  const summaryEl = $('alert-summary');
+  const alertListEl = $('alerts-list');
+  const playbookListEl = $('playbooks-list');
+
+  if (!summaryEl || !alertListEl || !playbookListEl) return;
+
+  // Render subheader description
+  const total = (alertsState.alerts[tab] || []).length;
+  summaryEl.textContent = `Showing ${total} ${tab.toLowerCase()} alert${total === 1 ? '' : 's'} based on dynamic customer metrics.`;
+
+  // Render based on current active tab
+  renderAlertsList(alertListEl, alertsState.alerts[tab], tab);
+  renderPlaybooksList(playbookListEl, false);
+}
+
+/* ── Render Alerts ──────────────────────────────────────────── */
+function renderAlertsList(container, list, tab) {
+  if (!list || list.length === 0) {
+    container.innerHTML = `<div class="empty-card">No ${tab.toLowerCase()} alerts active.</div>`;
+    return;
+  }
+
+  container.innerHTML = list.map(alert => {
+    let actionsHtml = '';
+    let borderStyle = '';
+    
+    // Left border severity indicator
+    if (alert.severity === 'High') {
+      borderStyle = 'border-left: 4px solid var(--red);';
+    } else if (alert.severity === 'Medium') {
+      borderStyle = 'border-left: 4px solid var(--orange);';
+    } else {
+      borderStyle = 'border-left: 4px solid var(--accent);';
+    }
+
+    if (tab === 'Open') {
+      actionsHtml = `
+        <div class="alert-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+          <button class="btn-secondary btn-small" onclick="acknowledgeAlert('${alert.id}')">Acknowledge</button>
+          <button class="btn-secondary btn-small" onclick="assignAlertCSMPrompt('${alert.id}')">Assign CSM</button>
+          <button class="btn-danger btn-small" onclick="resolveAlertPrompt('${alert.id}')">Resolve</button>
+        </div>`;
+    } else if (tab === 'Acknowledged') {
+      actionsHtml = `
+        <div class="alert-actions" style="margin-top: 12px; display: flex; gap: 8px;">
+          <span style="font-size: 0.82rem; color: var(--text-3); align-self: center;">CSM: <b>${alert.csm}</b></span>
+          <button class="btn-secondary btn-small" onclick="assignAlertCSMPrompt('${alert.id}')">Reassign</button>
+          <button class="btn-danger btn-small" onclick="resolveAlertPrompt('${alert.id}')">Resolve</button>
+        </div>`;
+    } else if (tab === 'Resolved') {
+      actionsHtml = `
+        <div style="margin-top: 12px; font-size: 0.82rem; color: var(--green); display: flex; align-items: center; gap: 6px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width: 14px; height: 14px;"><polyline points="20 6 9 17 4 12"/></svg>
+          Resolved (${alert.outcome || 'Retained'})
+        </div>`;
+    }
+
+    return `
+      <div class="alert-card" style="${borderStyle} padding: 16px; margin-bottom: 12px; background: rgba(255,255,255,0.04); border-radius: var(--radius);">
+        <div class="alert-meta" style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+          <div>
+            <div class="alert-title" style="font-weight: 700; color: var(--text-1); font-size: 0.95rem;">${alert.title}</div>
+            <div class="alert-sub" style="font-size: 0.78rem; color: var(--text-3);">Customer ${alert.customer} · ${alert.time}</div>
+          </div>
+          <span class="alert-badge ${alert.severity}" style="align-self: flex-start;">${alert.severity}</span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-2); margin-bottom: 10px;">${alert.details}</p>
+        <div class="alert-badges" style="display: flex; gap: 6px; flex-wrap: wrap;">
+          ${alert.signals.map(s => `<span class="alert-badge" style="background: rgba(255,255,255,0.06); color: var(--text-2); font-size: 0.7rem; padding: 2px 6px;">${s}</span>`).join('')}
+        </div>
+        ${actionsHtml}
+      </div>`;
+  }).join('');
+}
+
+/* ── Render Playbooks ───────────────────────────────────────── */
+function renderPlaybooksList(container, fullMode) {
+  if (alertsState.playbooks.length === 0) {
+    container.innerHTML = '<div class="empty-card">No playbooks configured.</div>';
+    return;
+  }
+
+  const headingHtml = '<h3 class="card-title" style="margin-bottom: 16px;">Automated Prevention Playbooks</h3>';
+
+  const cards = alertsState.playbooks.map(pb => {
+    return `
+      <div class="playbook-card" style="margin-bottom: 14px;">
+        <div class="playbook-meta" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h4 style="font-weight: 700; color: var(--text-1); font-size: 0.95rem;">${pb.name}</h4>
+          <span class="alert-badge ${pb.status === 'Active' ? 'Low' : 'Medium'}">${pb.status}</span>
+        </div>
+        <div style="font-size: 0.78rem; color: var(--text-3); margin-bottom: 10px;">Trigger: <i>${pb.trigger}</i></div>
+        <div class="playbook-steps" style="display: grid; gap: 6px; margin-bottom: 14px;">
+          ${pb.steps.map((step, idx) => `
+            <div class="playbook-step" style="font-size: 0.82rem; color: var(--text-2); background: rgba(255,255,255,0.03); padding: 8px 10px; border-radius: var(--radius); display: flex; gap: 8px;">
+              <span style="color: var(--accent); font-weight: 700;">${idx + 1}</span>
+              <span>${step}</span>
+            </div>`).join('')}
+        </div>
+        <div class="playbook-footer" style="display: flex; gap: 8px;">
+          <button class="btn-secondary btn-small" onclick="triggerPlaybookRun('${pb.id}')">Run Manually</button>
+          <button class="btn-secondary btn-small" onclick="togglePlaybookStatus('${pb.id}')">${pb.status === 'Active' ? 'Pause' : 'Activate'}</button>
+        </div>
+      </div>`;
+  }).join('');
+
+  container.innerHTML = headingHtml + cards;
+}
+
+/* ── Alert State Actions ────────────────────────────────────── */
+function acknowledgeAlert(id) {
+  const alertIndex = alertsState.alerts.Open.findIndex(a => a.id === id);
+  if (alertIndex > -1) {
+    const alert = alertsState.alerts.Open.splice(alertIndex, 1)[0];
+    alert.status = 'Acknowledged';
+    alert.csm = 'CSM Member';
+    alertsState.alerts.Acknowledged.push(alert);
+    showToast(`Alert for ${alert.customer} acknowledged by CSM.`, 'success');
+    updateAlertTabsCount();
+    buildAlertsView();
+  }
+}
+
+function assignAlertCSMPrompt(id) {
+  const csm = prompt("Enter CSM Name to Assign:", "Jane Doe");
+  if (csm) {
+    let alert = alertsState.alerts.Open.find(a => a.id === id);
+    if (!alert) alert = alertsState.alerts.Acknowledged.find(a => a.id === id);
+
+    if (alert) {
+      alert.csm = csm;
+      // If it was open, move to acknowledged since it now has assignment
+      const openIdx = alertsState.alerts.Open.findIndex(a => a.id === id);
+      if (openIdx > -1) {
+        alertsState.alerts.Open.splice(openIdx, 1);
+        alertsState.alerts.Acknowledged.push(alert);
+      }
+      showToast(`Assigned customer ${alert.customer} to CSM ${csm}.`, 'success');
+      updateAlertTabsCount();
+      buildAlertsView();
+    }
+  }
+}
+
+function resolveAlertPrompt(id) {
+  const outcome = confirm("Resolve Alert? Click OK if Customer was RETAINED, or Cancel if Customer CHURNED.");
+  const outcomeText = outcome ? 'Retained' : 'Churned';
+
+  let alert = alertsState.alerts.Open.find(a => a.id === id);
+  let openIdx = alertsState.alerts.Open.findIndex(a => a.id === id);
+  if (openIdx > -1) {
+    alertsState.alerts.Open.splice(openIdx, 1);
+  } else {
+    alert = alertsState.alerts.Acknowledged.find(a => a.id === id);
+    const ackIdx = alertsState.alerts.Acknowledged.findIndex(a => a.id === id);
+    if (ackIdx > -1) alertsState.alerts.Acknowledged.splice(ackIdx, 1);
+  }
+
+  if (alert) {
+    alert.status = 'Resolved';
+    alert.outcome = outcomeText;
+    alertsState.alerts.Resolved.push(alert);
+    showToast(`Alert resolved as: ${outcomeText}`, 'success');
+    updateAlertTabsCount();
+    buildAlertsView();
+  }
+}
+
+/* ── Playbook status toggle ─────────────────────────────────── */
+function togglePlaybookStatus(id) {
+  const pb = alertsState.playbooks.find(p => p.id === id);
+  if (pb) {
+    pb.status = pb.status === 'Active' ? 'Paused' : 'Active';
+    showToast(`Playbook "${pb.name}" is now ${pb.status.toLowerCase()}.`, 'success');
+    buildAlertsView();
+  }
+}
+
+/* ── Playbook Builder Modal Actions ─────────────────────────── */
+function openPlaybookBuilder() {
+  const modal = $('playbook-builder-modal');
+  if (modal) {
+    // Reset steps container to default 2 steps
+    $('pb-steps-container').innerHTML = `
+      <div style="display: flex; gap: 8px;">
+        <input class="form-input pb-step-input" placeholder="Step 1 description (e.g. Schedule personal CSM consultation)" required style="flex: 1;" />
+      </div>
+      <div style="display: flex; gap: 8px;">
+        <input class="form-input pb-step-input" placeholder="Step 2 description (e.g. Send targeted promotion offering 20% discount)" required style="flex: 1;" />
+      </div>`;
+    $('pb-form').reset();
+    modal.style.display = 'flex';
+  }
+}
+
+function closePlaybookBuilder() {
+  const modal = $('playbook-builder-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+$('pb-close-btn')?.addEventListener('click', closePlaybookBuilder);
+$('pb-cancel-btn')?.addEventListener('click', closePlaybookBuilder);
+
+$('pb-add-step-btn')?.addEventListener('click', () => {
+  const container = $('pb-steps-container');
+  if (container) {
+    const idx = container.children.length + 1;
+    const stepDiv = document.createElement('div');
+    stepDiv.style.display = 'flex';
+    stepDiv.style.gap = '8px';
+    stepDiv.innerHTML = `<input class="form-input pb-step-input" placeholder="Step ${idx} description..." required style="flex: 1;" />`;
+    container.appendChild(stepDiv);
+  }
+});
+
+$('pb-form')?.addEventListener('submit', e => {
+  e.preventDefault();
+  const name = $('pb-name').value;
+  const triggerText = $('pb-trigger').options[$('pb-trigger').selectedIndex].text;
+  
+  const steps = [];
+  document.querySelectorAll('.pb-step-input').forEach(input => {
+    if (input.value.trim()) steps.push(input.value.trim());
+  });
+
+  const newPlaybook = {
+    id: `pb-${Date.now()}`,
+    name: name,
+    trigger: triggerText,
+    status: 'Active',
+    steps: steps
+  };
+
+  alertsState.playbooks.push(newPlaybook);
+  showToast(`Playbook "${name}" successfully created.`, 'success');
+  closePlaybookBuilder();
+  buildAlertsView();
+});
+
+/* ── Playbook Run Manual Trigger ────────────────────────────── */
+function triggerPlaybookRun(id) {
+  const playbook = alertsState.playbooks.find(p => p.id === id);
+  const modal = $('playbook-run-modal');
+  const select = $('pr-customer-select');
+
+  if (playbook && modal && select) {
+    $('pr-title').textContent = `Run Playbook: ${playbook.name}`;
+    $('pr-playbook-id').value = playbook.id;
+    
+    // Populate customer dropdown
+    let optionsHtml = '<option value="">-- Choose a Customer --</option>';
+    if (state.allCustomers && state.allCustomers.length > 0) {
+      optionsHtml += state.allCustomers.map(c => `<option value="${c.id}">${c.id} (${c.risk_level} Risk - ${c.churn_prob}% Churn)</option>`).join('');
+    } else {
+      optionsHtml += '<option value="DEMO">Demo Customer (No active model)</option>';
+    }
+    select.innerHTML = optionsHtml;
+    modal.style.display = 'flex';
+  }
+}
+
+function closePlaybookRun() {
+  const modal = $('playbook-run-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+$('pr-close-btn')?.addEventListener('click', closePlaybookRun);
+$('pr-cancel-btn')?.addEventListener('click', closePlaybookRun);
+
+$('pr-form')?.addEventListener('submit', e => {
+  e.preventDefault();
+  const pbId = $('pr-playbook-id').value;
+  const customerId = $('pr-customer-select').value;
+  const playbook = alertsState.playbooks.find(p => p.id === pbId);
+
+  if (playbook && customerId) {
+    showToast(`Executing playbook "${playbook.name}" for customer ${customerId}.`, 'success');
+    closePlaybookRun();
+  }
+});
+
+/* ── Wire up alert tab click handlers ───────────────────────── */
+document.querySelectorAll('#alert-tabs .alert-tab').forEach(button => {
+  button.addEventListener('click', () => {
+    document.querySelectorAll('#alert-tabs .alert-tab').forEach(b => b.classList.remove('active'));
+    button.classList.add('active');
+    alertsState.tab = button.dataset.tab;
+    buildAlertsView();
+  });
+});
+
+$('alerts-create-playbook-btn')?.addEventListener('click', openPlaybookBuilder);
 
 /* ══════════════════  INIT  ════════════════════════════════ */
 initAuthUI();

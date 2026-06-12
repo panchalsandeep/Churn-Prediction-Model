@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session
 from flask_cors import CORS
 import pandas as pd
 import numpy as np
@@ -12,10 +12,13 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score,
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
-import joblib
 import os
-import json
 import io
+import json
+import pickle
+import hmac
+import hashlib
+import time
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -28,19 +31,25 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 static_dir = os.path.join(BASE_DIR, 'static')
 
 app = Flask(__name__, static_folder=static_dir, static_url_path='')
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-secret-change-me')
 CORS(app)
 
-# Initialize Firebase Admin SDK
-# On local dev or if no configurations are set, this will fail gracefully and run in Dev Mode
+# Initialize Firebase Admin SDK safely
 firebase_initialized = False
 try:
-    firebase_admin.initialize_app()
-    firebase_initialized = True
-    print("[INFO] Firebase Admin SDK successfully initialized.")
+    app_instance = firebase_admin.initialize_app()
+    # Ensure it was initialized with a valid project ID (required by Auth service)
+    if app_instance.project_id or os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT'):
+        firebase_initialized = True
+        print(f"[INFO] Firebase Admin SDK successfully initialized.")
+    else:
+        print("[WARNING] Firebase initialized but project_id is empty. Running in Bypass/Local mode for Firebase features.")
 except Exception as e:
     print(f"[WARNING] Firebase Admin SDK initialization failed: {e}. Running in Dev Mode (Bypass Auth).")
 
 ADMIN_EMAILS = [email.strip().lower() for email in os.environ.get('ADMIN_EMAILS', '').split(',') if email.strip()]
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
 ADMIN_SETTINGS_FILE = os.path.join(BASE_DIR, 'admin_settings.json')
 DEFAULT_ADMIN_SETTINGS = {
     'risk_thresholds': {
@@ -110,14 +119,72 @@ def is_admin_token(decoded_token):
     return decoded_token.get('admin') is True
 
 
+# ── Stateless admin token (HMAC-signed, works on Vercel serverless) ────────────
+ADMIN_TOKEN_TTL = 8 * 3600  # 8 hours
+
+def _sign(payload: str) -> str:
+    """Return HMAC-SHA256 hex digest of payload using FLASK_SECRET_KEY."""
+    key = app.secret_key.encode() if isinstance(app.secret_key, str) else app.secret_key
+    return hmac.new(key, payload.encode(), hashlib.sha256).hexdigest()
+
+def create_admin_token() -> str:
+    """Create a signed token: base64(expires_ts) + '.' + signature."""
+    import base64
+    expires = int(time.time()) + ADMIN_TOKEN_TTL
+    payload = str(expires)
+    sig = _sign(payload)
+    token = base64.urlsafe_b64encode(payload.encode()).decode() + '.' + sig
+    return token
+
+def verify_admin_token(token: str) -> bool:
+    """Return True if token is valid and not expired."""
+    import base64
+    try:
+        b64_payload, sig = token.rsplit('.', 1)
+        payload = base64.urlsafe_b64decode(b64_payload + '==').decode()
+        expires = int(payload)
+        if time.time() > expires:
+            return False
+        expected_sig = _sign(payload)
+        return hmac.compare_digest(sig, expected_sig)
+    except Exception:
+        return False
+
+def is_admin_session():
+    """Check request for a valid admin token (Authorization header or X-Admin-Token)."""
+    token = request.headers.get('X-Admin-Token', '')
+    if token and verify_admin_token(token):
+        return True
+    # Fallback: legacy Flask session (for local dev)
+    return session.get('admin_authenticated') is True
+
 def require_admin(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if is_admin_session():
+            return f(*args, **kwargs)
+
         has_firebase_config = os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
         if not firebase_initialized or not has_firebase_config:
-            return f(*args, **kwargs)
+            # Bypass authentication ONLY if no admin password is set (local guest mode)
+            if not ADMIN_PASSWORD:
+                return f(*args, **kwargs)
+
+        # Parse Firebase ID token if request.user is not yet populated
         if not hasattr(request, 'user') or request.user is None:
-            return jsonify({'error': 'Unauthorized: Admin access required'}), 401
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                if not firebase_initialized:
+                    return jsonify({'error': 'Unauthorized: Firebase auth is not configured on the backend'}), 401
+                token = auth_header.split('Bearer ')[1]
+                try:
+                    decoded_token = auth.verify_id_token(token)
+                    request.user = decoded_token
+                except Exception as e:
+                    return jsonify({'error': f'Unauthorized: Firebase verification failed: {str(e)}'}), 401
+            else:
+                return jsonify({'error': 'Unauthorized: Admin access or token required'}), 401
+
         if not is_admin_token(request.user):
             return jsonify({'error': 'Forbidden: Admin access required'}), 403
         return f(*args, **kwargs)
@@ -299,6 +366,13 @@ def upload_file():
             'monthly':      float(row.get('monthly_charges', 0)) if hasattr(row, 'get') else 0,
             'support':      int(row.get('support_tickets', 0)) if hasattr(row, 'get') else 0,
             'last_login':   int(row.get('last_login_days', 0)) if hasattr(row, 'get') else 0,
+            'contract_type': str(row.get('contract_type', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'payment_method': str(row.get('payment_method', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'gender':       str(row.get('gender', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'location':     str(row.get('location', 'Unknown')) if hasattr(row, 'get') else 'Unknown',
+            'num_products': int(row.get('num_products', 0)) if hasattr(row, 'get') else 0,
+            'logins':       int(row.get('num_logins_last30', 0)) if hasattr(row, 'get') else 0,
+            'age':          int(row.get('age', 0)) if hasattr(row, 'get') else 0,
         })
 
     customer_list_sorted = sorted(customer_list, key=lambda x: x['churn_prob'], reverse=True)
@@ -490,34 +564,95 @@ def get_customers():
 @app.route('/api/admin/whoami', methods=['GET'])
 @require_firebase_auth
 def admin_whoami():
-    if not firebase_initialized or not (os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')):
-        return jsonify({'is_admin': False, 'email': None, 'message': 'Auth not fully configured in this environment.'})
-    return jsonify({
-        'is_admin': is_admin_token(request.user),
-        'email': request.user.get('email'),
-        'uid': request.user.get('uid')
-    })
+    if is_admin_session():
+        return jsonify({'is_admin': True, 'email': None, 'uid': None, 'mode': 'session'})
+
+    # If we have a decoded user token (even without full Firebase Admin SDK),
+    # check the email against the ADMIN_EMAILS environment variable list.
+    if hasattr(request, 'user') and request.user:
+        email = (request.user.get('email') or '').lower()
+        is_admin = bool(email and email in ADMIN_EMAILS) or request.user.get('admin') is True
+        return jsonify({
+            'is_admin': is_admin,
+            'email': email,
+            'uid': request.user.get('uid'),
+            'mode': 'firebase'
+        })
+
+    return jsonify({'is_admin': False, 'email': None, 'message': 'Auth not fully configured in this environment.'})
+
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_login():
+    if not ADMIN_PASSWORD:
+        return jsonify({'error': 'Admin password not configured. Set ADMIN_PASSWORD in environment.'}), 500
+
+    data = request.get_json() or {}
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
+
+    if username.lower() != ADMIN_USERNAME.lower() or password != ADMIN_PASSWORD:
+        return jsonify({'error': 'Invalid admin credentials'}), 401
+
+    # Issue a stateless signed token (works on Vercel serverless)
+    token = create_admin_token()
+    # Also set legacy session for local dev
+    session['admin_authenticated'] = True
+    return jsonify({'status': 'success', 'message': 'Admin session active.', 'token': token})
+
+
+@app.route('/api/admin/logout', methods=['POST'])
+def admin_logout():
+    session.pop('admin_authenticated', None)
+    return jsonify({'status': 'success', 'message': 'Logged out.'})
+
+
+@app.route('/api/admin/session', methods=['GET'])
+def admin_session():
+    return jsonify({'is_admin': is_admin_session()})
+
+
+@app.route('/api/admin/verify-token', methods=['POST'])
+def admin_verify_token():
+    """Verify a token sent by the browser."""
+    data = request.get_json() or {}
+    token = data.get('token', '')
+    return jsonify({'is_admin': verify_admin_token(token)})
+
+
+@app.route('/admin', methods=['GET'])
+def admin_page():
+    if not ADMIN_PASSWORD:
+        return jsonify({'error': 'Admin login is not configured. Please set ADMIN_PASSWORD.'}), 500
+    return send_from_directory(static_dir, 'admin.html')
 
 
 @app.route('/api/admin/users', methods=['GET'])
 @require_admin
 def admin_list_users():
     if not firebase_initialized:
-        return jsonify({'error': 'Firebase admin SDK unavailable.'}), 501
+        return jsonify({'users': [], 'message': 'Firebase is not initialized (Local Mode)'})
 
-    users = []
-    for user in auth.list_users().iterate_all():
-        provider_ids = [p.provider_id for p in user.provider_data] if user.provider_data else []
-        users.append({
-            'uid': user.uid,
-            'email': user.email,
-            'display_name': user.display_name,
-            'disabled': user.disabled,
-            'provider_ids': provider_ids,
-            'created_at': user.user_metadata.creation_timestamp,
-            'last_sign_in_at': user.user_metadata.last_sign_in_timestamp
+    try:
+        users = []
+        for user in auth.list_users().iterate_all():
+            provider_ids = [p.provider_id for p in user.provider_data] if user.provider_data else []
+            users.append({
+                'uid': user.uid,
+                'email': user.email,
+                'display_name': user.display_name,
+                'disabled': user.disabled,
+                'provider_ids': provider_ids,
+                'created_at': user.user_metadata.creation_timestamp,
+                'last_sign_in_at': user.user_metadata.last_sign_in_timestamp
+            })
+        return jsonify({'users': users})
+    except Exception as e:
+        print(f"[WARNING] Failed to list Firebase users: {e}")
+        return jsonify({
+            'users': [],
+            'message': 'Firebase auth service is not configured or available in this environment.'
         })
-    return jsonify({'users': users})
 
 
 @app.route('/api/admin/users/<uid>', methods=['PATCH'])
@@ -528,14 +663,18 @@ def admin_update_user(uid):
 
     data = request.get_json() or {}
     action = data.get('action')
-    if action == 'disable':
-        auth.update_user(uid, disabled=True)
-    elif action == 'enable':
-        auth.update_user(uid, disabled=False)
-    elif action == 'delete':
-        auth.delete_user(uid)
-    else:
-        return jsonify({'error': 'Invalid action'}), 400
+    try:
+        if action == 'disable':
+            auth.update_user(uid, disabled=True)
+        elif action == 'enable':
+            auth.update_user(uid, disabled=False)
+        elif action == 'delete':
+            auth.delete_user(uid)
+        else:
+            return jsonify({'error': 'Invalid action'}), 400
+    except Exception as e:
+        print(f"[ERROR] Failed to update user {uid}: {e}")
+        return jsonify({'error': f'Failed to perform action: {str(e)}'}), 500
 
     return jsonify({'status': 'success', 'action': action})
 
