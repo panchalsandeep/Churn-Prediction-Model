@@ -6,8 +6,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "api": "python api/index.py",
-    "retrain-model": "python scripts/retrain_default_model.py",
-    "test:api": "python -m pytest tests -q"
+    "test:api": "python -m pytest tests -q",
+    "demo-data": "python scripts/generate_demo_dataset.py 5000"
   },
   "dependencies": {
     "chart.js": "^4.4.3",

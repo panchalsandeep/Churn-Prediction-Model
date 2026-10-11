@@ -1,100 +1,90 @@
-# ChurnSight — Churn Prediction Dashboard
+# ChurnSight
 
-AI-assisted churn prediction for customer success teams: upload a labeled CSV, train a model, explore risk analytics, and score individual customers.
+Churn prediction for customer-success teams. Upload any churn CSV (or use the built-in demo), and ChurnSight detects the schema, compares models, calibrates probabilities, evaluates honestly, ranks accounts by **revenue at risk**, explains each score, and tracks what your team did about it.
 
-## Stack
+Architecture and modelling decisions: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-- **Frontend:** Vite + vanilla JS (`index.html`, `src/main.js`, helpers in `src/lib/`), Chart.js and Firebase Auth (both lazy-loaded)
-- **Backend:** Flask + scikit-learn (`api/index.py`)
-- **Deploy:** Vercel (static build → `dist/`, Python serverless for `/api/*`)
+## What it does
 
-The legacy `static/app.js` SPA is retired. Use the Vite entrypoint only.
+- **Any CSV.** One requirement: a churn column (`0/1`, `Yes/No`, `Churned`…). IDs, dates, numeric/categorical features, junk columns and possible target leakage are detected and shown before training (Telco, bank and SaaS exports work as-is).
+- **Honest modelling.** Gradient boosting vs logistic regression vs random forest, chosen on cross-validated **PR-AUC**; calibrated probabilities; time-based holdout when a snapshot date exists; out-of-fold scores for the customer list; bootstrap confidence intervals.
+- **Business-aware.** Outreach cost, save rate and value horizon set the "worth contacting" threshold and the High/Medium/Low tiers. Customers rank by expected loss, not just probability.
+- **Explainable.** Per-customer drivers ("why this score"), global permutation importance, recommended actions, and a **what-if simulator** that re-scores live.
+- **Operational.** Persisted alerts (Open → Acknowledged → Resolved, assign, jump detection), a **closed-loop action log** with outcomes and save rates, batch scoring with **drift monitoring** (PSI), a **model registry** with promote/rollback, and an audit log.
+- **UX.** Light/dark theme, command palette (`Ctrl/Cmd+K`), keyboard shortcuts (`?`), server-paged sortable table with bulk export, animated transitions that respect `prefers-reduced-motion`.
 
-## Features
-
-- **Light/dark theme** (toggle in the top bar or press `d`); remembers your choice and follows the OS until you pick one.
-- **Command palette** (`Ctrl/Cmd+K`): jump to any page, run actions, or find a customer by ID. Press `?` for all shortcuts (`g` then `o/h/c/a/n/t/p` navigates, `/` focuses search).
-- **Customer table**: sortable columns, debounced search (ID, location, contract, payment), page-size picker, multi-select with floating bulk export, skeleton loading.
-- **What-if simulator** (Predict Single): drag levers to re-score a customer live and see which features push risk up or down. Also reachable from a customer's detail drawer via *Simulate what-if*.
-- **Alert workflow**: Acknowledge, Resolve and Assign actually move alerts between tabs.
-- **Motion**: section/stagger transitions, sliding nav indicator, count-ups, animated gauge and charts, slide-over drawer. All of it respects `prefers-reduced-motion`.
-
-## Quick start (local)
+## Quick start
 
 ```bash
-# Terminal 1 — API
-python -m venv .venv
-# Windows: .venv\Scripts\activate
+# API  (Python 3.12+)
+python -m venv .venv && .venv\Scripts\activate      # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-npm run api
+npm run api                                          # http://localhost:5050
 
-# Terminal 2 — frontend
+# Frontend
 npm install
-npm run dev
+npm run dev                                          # http://localhost:5173 (proxies /api)
 ```
 
-Open the Vite URL (default `http://localhost:5173`). The dev server proxies `/api` to `http://localhost:5050`.
+Open the app and click **Try the demo dataset**: it trains on 8,000 synthetic SaaS customers in under a minute. Locally, with no Firebase credentials configured, API auth is bypassed so you can develop without an account (the login card still appears; the API does not require it).
 
-Copy `.env.example` to `.env` if you need to override Firebase web config.
+`npm run demo-data` rewrites `public/sample_data.csv` (the "Download demo CSV" link).
 
-## Sample data
+## The data it expects
 
-`sample_data.csv` (also copied to `public/` for the Vite build) includes the required columns:
+Anything tabular with a churn label. Best results come from behavioural features (rolling usage, tickets, payment failures) and a snapshot date for the time-based holdout; a revenue column (`monthly_charges`, `mrr`, …) enables revenue-at-risk. Public sets such as the IBM Telco and bank-churn CSVs map automatically. The demo generator ([api/churn/demo_data.py](api/churn/demo_data.py)) shows the shape.
 
-`customer_id, age, gender, location, tenure_months, monthly_charges, total_charges, num_products, num_logins_last30, support_tickets, last_login_days, contract_type, payment_method, churn`
-
-## API overview
+## API
 
 | Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/health` | Liveness + auth/model status |
-| POST | `/api/upload` | Train model from CSV |
-| POST | `/api/predict` | Score one customer (`"explain": true` adds per-feature impact vs a typical customer) |
-| GET | `/api/results` | Last training payload |
-| GET | `/api/customers` | Paginated risk list |
-| GET/POST | `/api/admin/settings` | Risk thresholds & alert rules |
-| GET | `/api/admin/model` | Model session status |
+|---|---|---|
+| POST | `/api/preview` | Show how a CSV will be interpreted |
+| POST | `/api/upload` · `/api/demo` | Train (async job; `?wait=1` blocks) |
+| POST | `/api/score` | Score a new batch with the champion, report drift |
+| GET | `/api/jobs/<id>` | Job stage and progress |
+| GET | `/api/results` | Metrics, charts data, cohorts, segments, summary (no customer list) |
+| GET | `/api/customers` | Server-side paging: `tier, q, sort, dir, page, limit` |
+| GET/POST | `/api/customers/export` | Streamed, formula-safe CSV (POST with `ids`) |
+| GET | `/api/customers/<id>` | 360 view: reasons, actions, activity |
+| GET · POST | `/api/model/schema` · `/api/predict` | Dynamic form fields; score one customer with explanations |
+| GET · POST | `/api/settings` | Economics, thresholds, alert rules |
+| GET · POST | `/api/models` · `/api/models/<id>/promote` | Registry |
+| GET | `/api/monitoring/drift` | Latest batch drift |
+| GET · PATCH | `/api/alerts` · `/api/alerts/<id>` | Alert workflow |
+| POST · PATCH · GET | `/api/customers/<id>/interventions` · `/api/interventions/<id>` · `/api/interventions/summary` | Closed loop |
+| GET · PATCH | `/api/admin/users` · `/api/admin/audit` | Admin only |
 
-Reported metrics (`accuracy`, ROC, etc.) come from a **holdout test set**. Customer risk scores cover the full uploaded file.
+## Auth and tenancy
 
-## Auth behavior
+- **Local/dev:** without Firebase Admin credentials, auth is bypassed and everything runs in the `local` workspace.
+- **Production:** auth **fails closed** (HTTP 503) until Firebase Admin is configured. Set `ADMIN_EMAILS` for admin features.
+- **Workspaces** are per account by default (`WORKSPACE_MODE=user`); `domain` shares by company email domain, `shared` is one workspace for everyone.
 
-- **Local/dev:** if Firebase Admin is not configured, API auth is bypassed so you can develop without credentials.
-- **Production / Vercel:** auth **fails closed** (HTTP 503) until Firebase Admin credentials are configured. Set `ADMIN_EMAILS` for admin console access.
+## Configuration
+
+See [.env.example](.env.example): `DATABASE_URL` (SQLite by default, Postgres for anything shared), `DATA_DIR`, upload and rate limits, `CORS_ORIGINS`, `METRICS_TOKEN`.
+
+## Run it as a service
+
+```bash
+docker compose up --build        # app + Postgres at http://localhost:8080
+```
+
+The image builds the frontend and serves it with the API behind gunicorn. `FLASK_ENV=production` makes auth fail closed, so provide Firebase Admin credentials (see the comments in `docker-compose.yml`) or drop that variable for a local trial.
+
+**Vercel** still works for the frontend and light API use, but sklearn + pandas + firebase-admin is close to the function size limit, `/tmp` is per-instance (so models do not persist reliably), and training runs inline. Use a container for real workloads.
+
+## Tests and CI
+
+```bash
+python -m pytest tests -q        # ~3 min; includes the model-quality gate
+npm run build
+```
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs both on every push and pull request. The quality gate fails the build if ROC-AUC, PR-AUC lift, top-decile lift or calibration fall below fixed floors on generated data.
 
 ## Performance notes
 
-- Chart.js and Firebase are code-split and loaded on demand; charts are built the first time their page is opened.
-- API JSON is gzipped and carries ETags, so repeat `GET /api/results` calls revalidate with a 304.
-- Hashed `/assets/*` are served with a one-year immutable cache header on Vercel.
-
-## Persistence
-
-Training artifacts are written under `.data/` locally (or `/tmp` on Vercel):
-
-- `churn_model.pkl`
-- `training_results.json`
-- `admin_settings.json`
-
-On Vercel, `/tmp` is **per-instance**. Same-instance restore works; for durable multi-instance storage, move these to object storage / a database.
-
-## Regenerating the bundled model
-
-```bash
-pip install -r requirements.txt
-npm run retrain-model
-```
-
-Keep `scikit-learn` pinned in `requirements.txt` in sync with the environment that writes `api/churn_model.pkl`.
-
-## Tests
-
-```bash
-pip install -r requirements.txt
-npm run test:api
-```
-
-## Deploy (Vercel)
-
-1. Set env vars from `.env.example` (`FIREBASE_PROJECT_ID`, service account / `GOOGLE_APPLICATION_CREDENTIALS`, `ADMIN_EMAILS`).
-2. Build uses `npm run build` → `dist/`; API routes to `api/index.py`.
+- Chart.js and Firebase are code-split and loaded on demand; charts build when their page is first opened.
+- The customer table is paged, sorted and filtered in SQL. API JSON is gzipped with ETags; hashed assets are immutable-cached.
+- Training is a background job with real progress; scores come from out-of-fold predictions; the champion model is cached in memory per workspace.

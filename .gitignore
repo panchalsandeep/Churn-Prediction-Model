@@ -2,7 +2,7 @@ __pycache__/
 *.pyc
 .DS_Store
 *.pkl
-!api/churn_model.pkl
+
 node_modules/
 dist/
 .data/

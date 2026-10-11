@@ -63,23 +63,30 @@ export function initPalette(api) {
   };
   const anyOpen = () => overlay.classList.contains('is-open') || shortcuts.classList.contains('is-open');
 
+  let buildToken = 0;
+
   function build(query) {
+    const token = ++buildToken;
     const commands = api.getCommands()
       .map(c => ({ ...c, s: score(query, `${c.label} ${c.keywords || ''}`) }))
       .filter(c => c.s > 0)
-      .sort((a, b) => b.s - a.s);
-    const customers = query.length >= 2
-      ? api.findCustomers(query).slice(0, 6).map(c => ({
-          id: `customer:${c.id}`,
-          label: c.id,
-          group: 'Customers',
-          hint: `${c.risk_level} risk · ${c.churn_prob}%`,
-          run: () => api.openCustomer(c.id),
-        }))
-      : [];
-    items = [...commands.slice(0, 9), ...customers];
+      .sort((a, b) => b.s - a.s)
+      .slice(0, 9);
+    items = commands;
     active = 0;
     render(query);
+
+    // Customers are searched on the server; results arrive after the commands are already on screen.
+    if (query.length >= 2) {
+      Promise.resolve(api.findCustomers(query)).then(found => {
+        if (token !== buildToken || !found?.length) return;
+        items = [...commands, ...found.slice(0, 6).map(c => ({
+          id: `customer:${c.id}`, label: c.id, group: 'Customers',
+          hint: `${c.risk_level} risk · ${c.churn_prob}%`, run: () => api.openCustomer(c.id),
+        }))];
+        render(query);
+      }).catch(() => {});
+    }
   }
 
   function render(query) {

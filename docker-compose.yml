@@ -1,0 +1,23 @@
+# docker compose up --build   →  http://localhost:8080
+services:
+  app:
+    build: .
+    ports: ["8080:8080"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://churn:churn@db:5432/churnsight
+      WORKSPACE_MODE: user            # user | domain | shared
+      FLASK_ENV: production
+      # Production needs Firebase Admin credentials; without them every API call fails closed (HTTP 503).
+      # For a local trial without auth, comment out FLASK_ENV and leave these unset.
+      # GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase.json
+      # FIREBASE_PROJECT_ID: your-project
+      # ADMIN_EMAILS: you@company.com
+    volumes: ["models:/data"]
+    depends_on:
+      db: { condition: service_healthy }
+  db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: churn, POSTGRES_PASSWORD: churn, POSTGRES_DB: churnsight }
+    volumes: ["pg:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U churn"], interval: 3s, timeout: 3s, retries: 20 }
+volumes: { models: {}, pg: {} }
