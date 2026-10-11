@@ -189,7 +189,7 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=160), nullable=False),
     sa.Column('plan', sa.String(length=24), server_default='trial', nullable=False),
     sa.Column('status', sa.String(length=12), server_default='active', nullable=False),
-    sa.Column('sso_required', sa.Boolean(), server_default=sa.text('0'), nullable=False),
+    sa.Column('sso_required', sa.Boolean(), server_default=sa.false(), nullable=False),
     sa.Column('created_at', sa.Float(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )

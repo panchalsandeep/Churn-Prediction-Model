@@ -85,7 +85,7 @@ jobs:
       - name: JavaScript dependencies (high and critical only)
         run: npm audit --omit=dev --audit-level=high
       - name: Scan the repository and the container image
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.33.1
         with:
           scan-type: fs
           scan-ref: .
