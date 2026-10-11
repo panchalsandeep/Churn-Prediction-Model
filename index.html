@@ -7,22 +7,45 @@
   <meta name="description" content="Predict and prevent customer churn with AI-driven analytics. Upload data, train models, and get actionable insights for Customer Success Managers." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="static/style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#F3EFE6" />
+  <script>
+    // Apply the saved/system theme before first paint to avoid a light flash.
+    (function () {
+      try {
+        var saved = localStorage.getItem('churnsight-theme');
+        var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+      } catch (e) {}
+    })();
+  </script>
 </head>
-<body>
+<body class="cs-shell">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="ambient" aria-hidden="true">
+    <span class="ambient-orb ambient-orb--a"></span>
+    <span class="ambient-orb ambient-orb--b"></span>
+    <span class="ambient-grid"></span>
+  </div>
 
 <!-- ═══════════════════════════  SIDEBAR  ═══════════════════════════ -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <div class="logo-icon">
-      <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="url(#lg1)"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="10" r="2.5" fill="#fff"/><defs><linearGradient id="lg1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs></svg>
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#0B3D4A"/>
+        <path d="M8 20 L13 13 L18 17 L24 10" stroke="#F2E8D5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="24" cy="10" r="2.4" fill="#E8A838"/>
+      </svg>
     </div>
-    <span class="logo-text">ChurnSight</span>
+    <div class="logo-copy">
+      <span class="logo-text">ChurnSight</span>
+      <span class="logo-tag">Retention intelligence</span>
+    </div>
   </div>
 
   <nav class="sidebar-nav" role="navigation" aria-label="Primary navigation">
+    <span class="nav-indicator" id="nav-indicator" aria-hidden="true"></span>
     <a class="nav-item active" data-section="upload" href="#" id="nav-upload" aria-label="Upload and train model">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
       Upload &amp; Train
@@ -82,7 +105,7 @@
 </aside>
 
 <!-- ═══════════════════════════  MAIN  ═══════════════════════════ -->
-<main class="main-content">
+<main class="main-content" id="main-content">
 
   <!-- TOP BAR -->
   <header class="topbar">
@@ -94,6 +117,14 @@
     </div>
     <div class="topbar-right">
       <div class="topbar-badge" id="algo-badge" style="display:none"></div>
+      <button class="palette-trigger" id="palette-trigger" type="button" aria-label="Open command palette" aria-keyshortcuts="Control+K Meta+K">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span>Search</span><kbd id="palette-kbd">Ctrl K</kbd>
+      </button>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false" title="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
       <div class="time-display" id="time-display"></div>
     </div>
   </header>
@@ -117,7 +148,7 @@
 
         <div class="drop-zone" id="drop-zone">
           <div class="drop-zone-icon">
-            <svg viewBox="0 0 64 64" fill="none"><rect x="8" y="8" width="48" height="48" rx="8" fill="url(#dz1)" opacity="0.15"/><polyline points="32 20 32 44" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><polyline points="22 30 32 20 42 30" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="48" x2="44" y2="48" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><defs><linearGradient id="dz1" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient><linearGradient id="dz2" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs></svg>
+            <svg viewBox="0 0 64 64" fill="none"><rect x="8" y="8" width="48" height="48" rx="8" fill="url(#dz1)" opacity="0.18"/><polyline points="32 20 32 44" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><polyline points="22 30 32 20 42 30" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="48" x2="44" y2="48" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><defs><linearGradient id="dz1" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#0B3D4A"/><stop offset="1" stop-color="#E8A838"/></linearGradient><linearGradient id="dz2" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#147A7A"/><stop offset="1" stop-color="#0B3D4A"/></linearGradient></defs></svg>
           </div>
           <p class="drop-text">Drag &amp; drop your CSV here</p>
           <p class="drop-sub">or click to browse files</p>
@@ -183,48 +214,74 @@
       </div>
     </div>
 
-    <!-- Error / Success Toast -->
-    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </section>
 
   <!-- ── SECTION: OVERVIEW ── -->
   <section class="section" id="section-overview">
+    <div class="overview-hero reveal">
+      <div>
+        <p class="eyebrow">Portfolio pulse</p>
+        <h2 class="display-title">Where retention needs attention</h2>
+        <p class="lede" id="overview-lede">Train a model to unlock live risk, holdout metrics, and action cues.</p>
+      </div>
+      <div class="section-actions">
+        <button class="btn-secondary" id="retrain-btn" type="button">Retrain Model</button>
+        <button class="btn-primary" id="export-overview-btn" type="button">Export Risk CSV</button>
+      </div>
+    </div>
+
+    <div class="insights-strip reveal" id="insights-strip" aria-live="polite">
+      <article class="insight-tile">
+        <span class="insight-label">At-risk monthly revenue</span>
+        <strong class="insight-value" id="insight-revenue">–</strong>
+        <span class="insight-meta" id="insight-revenue-meta">High-risk accounts × monthly charges</span>
+      </article>
+      <article class="insight-tile">
+        <span class="insight-label">Top churn driver</span>
+        <strong class="insight-value" id="insight-driver">–</strong>
+        <span class="insight-meta" id="insight-driver-meta">From model feature importance</span>
+      </article>
+      <article class="insight-tile">
+        <span class="insight-label">Next best action</span>
+        <strong class="insight-value insight-value--sm" id="insight-action">Train to generate playbook cues</strong>
+        <span class="insight-meta" id="insight-action-meta">Based on open alert signals</span>
+      </article>
+    </div>
+
     <div class="kpi-grid" id="kpi-grid">
-      <div class="kpi-card" id="kpi-total" data-risk="All">
-        <div class="kpi-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+      <div class="kpi-card reveal" id="kpi-total" data-risk="All" style="--delay:0">
+        <div class="kpi-icon accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
         <div class="kpi-content"><span class="kpi-value" id="kpi-total-val">–</span><span class="kpi-label">Total Customers</span></div>
       </div>
-      <div class="kpi-card" id="kpi-churn">
+      <div class="kpi-card reveal" id="kpi-churn" style="--delay:1">
         <div class="kpi-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
         <div class="kpi-content"><span class="kpi-value" id="kpi-churn-val">–</span><span class="kpi-label">Churn Rate</span></div>
       </div>
-      <div class="kpi-card" id="kpi-high" data-risk="High">
+      <div class="kpi-card reveal" id="kpi-high" data-risk="High" style="--delay:2">
         <div class="kpi-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
         <div class="kpi-content"><span class="kpi-value" id="kpi-high-val">–</span><span class="kpi-label">High Risk</span></div>
       </div>
-      <div class="kpi-card" id="kpi-acc">
+      <div class="kpi-card reveal" id="kpi-acc" style="--delay:3">
         <div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-acc-val">–</span><span class="kpi-label">Model Accuracy</span></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-acc-val">–</span><span class="kpi-label">Holdout Accuracy</span></div>
       </div>
-      <div class="kpi-card" id="kpi-f1">
+      <div class="kpi-card reveal" id="kpi-f1" style="--delay:4">
         <div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
         <div class="kpi-content"><span class="kpi-value" id="kpi-f1-val">–</span><span class="kpi-label">F1 Score</span></div>
       </div>
-      <div class="kpi-card" id="kpi-auc">
-        <div class="kpi-icon indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+      <div class="kpi-card reveal" id="kpi-auc" style="--delay:5">
+        <div class="kpi-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
         <div class="kpi-content"><span class="kpi-value" id="kpi-auc-val">–</span><span class="kpi-label">AUC-ROC</span></div>
-      </div>
-      <div class="section-actions">
-        <button class="btn-secondary" id="retrain-btn">Retrain Model</button>
       </div>
     </div>
 
     <div class="charts-row">
-      <div class="card chart-card">
-        <h3 class="card-title">Churn Rate Trend</h3>
-        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+      <div class="card chart-card reveal">
+        <h3 class="card-title">Churn Rate by Tenure Band</h3>
+        <p class="card-subtitle" id="trend-note">Holdout metrics power KPIs; this chart uses tenure bands from the uploaded dataset.</p>
+        <div class="chart-wrap"><canvas id="trendChart" aria-label="Churn rate by tenure band"></canvas></div>
       </div>
-      <div class="card chart-card">
+      <div class="card chart-card reveal">
         <h3 class="card-title">Risk Distribution</h3>
         <div class="chart-wrap chart-wrap--sm"><canvas id="riskDonutChart"></canvas></div>
         <div class="donut-legend" id="donut-legend"></div>
@@ -401,7 +458,21 @@
         <button class="risk-filter medium" data-risk="Medium">Medium</button>
         <button class="risk-filter low" data-risk="Low">Low Risk</button>
       </div>
-      <div class="customer-count" id="customer-count">Showing 0 customers</div>
+      <div class="customer-count" id="customer-count" aria-live="polite">Showing 0 customers</div>
+      <label class="page-size" for="page-size">Rows
+        <select id="page-size" aria-label="Rows per page">
+          <option>10</option><option selected>20</option><option>50</option><option>100</option>
+        </select>
+      </label>
+      <button class="btn-secondary btn-toolbar" id="export-customers-btn" type="button">Export CSV</button>
+    </div>
+
+    <div class="bulk-bar" id="bulk-bar" hidden>
+      <span id="bulk-count">0 selected</span>
+      <div class="bulk-actions">
+        <button class="btn-secondary btn-small" id="bulk-export" type="button">Export selected</button>
+        <button class="btn-secondary btn-small" id="bulk-clear" type="button">Clear</button>
+      </div>
     </div>
 
     <div class="card table-card">
@@ -409,18 +480,19 @@
         <table class="customer-table" id="customer-table">
           <thead>
             <tr>
-              <th>Customer ID</th>
-              <th>Risk Level</th>
-              <th>Churn Probability</th>
-              <th>Tenure (mo)</th>
-              <th>Monthly Charges</th>
-              <th>Support Tickets</th>
-              <th>Last Login (days)</th>
-              <th>Actual Churn</th>
+              <th class="col-select"><input type="checkbox" id="select-all" aria-label="Select all customers on this page" /></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="id" type="button">Customer ID</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="risk_level" type="button">Risk Level</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="churn_prob" type="button">Churn Probability</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="tenure" type="button">Tenure (mo)</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="monthly" type="button">Monthly Charges</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="support" type="button">Support Tickets</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="last_login" type="button">Last Login (days)</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="actual" type="button">Actual Churn</button></th>
             </tr>
           </thead>
           <tbody id="customer-tbody">
-            <tr><td colspan="8" class="empty-row">No data loaded. Please train a model first.</td></tr>
+            <tr><td colspan="9" class="empty-row">No data loaded. Please train a model first.</td></tr>
           </tbody>
         </table>
       </div>
@@ -544,6 +616,19 @@
             </h4>
             <ul id="recs-list"></ul>
           </div>
+
+          <div class="whatif" id="whatif" aria-labelledby="whatif-title">
+            <div class="whatif-head">
+              <h4 id="whatif-title">What-if simulator</h4>
+              <span class="whatif-delta" id="whatif-delta" aria-live="polite"></span>
+              <button class="btn-secondary btn-small" id="whatif-reset" type="button">Reset</button>
+            </div>
+            <p class="whatif-hint">Drag a lever to re-score this customer live.</p>
+            <div class="whatif-levers" id="whatif-levers"></div>
+            <div class="whatif-contract" id="whatif-contract" role="radiogroup" aria-label="Contract type"></div>
+            <h5 class="impact-title">What is driving this score</h5>
+            <div class="impact-list" id="impact-list"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -552,7 +637,7 @@
 </main>
 
 <!-- Customer Detail Drawer -->
-<div class="drawer-overlay" id="customer-drawer" style="display:none" role="dialog" aria-modal="true" aria-labelledby="drawer-customer-id">
+<div class="drawer-overlay" id="customer-drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="drawer-customer-id">
   <div class="drawer-panel">
     <button class="drawer-close" id="drawer-close" aria-label="Close customer details">×</button>
     <div class="drawer-header">
@@ -561,11 +646,13 @@
         <span class="risk-tag" id="drawer-risk-tag">Risk</span>
       </div>
       <div class="drawer-actions">
-        <button class="btn-secondary" id="drawer-train-btn">Retrain Model</button>
+        <button class="btn-primary btn-small" id="drawer-sim-btn" type="button">Simulate what-if</button>
+        <button class="btn-secondary btn-small" id="drawer-train-btn" type="button">Retrain Model</button>
       </div>
     </div>
     <div class="drawer-content" id="drawer-content">
       <div class="drawer-row"><span>Churn Probability</span><strong id="drawer-churn-prob">–</strong></div>
+      <div class="drawer-prob" aria-hidden="true"><span class="drawer-prob-fill" id="drawer-prob-fill"></span></div>
       <div class="drawer-row"><span>Tenure</span><strong id="drawer-tenure">–</strong></div>
       <div class="drawer-row"><span>Monthly Charges</span><strong id="drawer-monthly">–</strong></div>
       <div class="drawer-row"><span>Support Tickets</span><strong id="drawer-support">–</strong></div>
@@ -578,7 +665,7 @@
 </div>
 
 <!-- Loading Overlay -->
-<div class="loading-overlay" id="loading-overlay" style="display:none">
+<div class="loading-overlay" id="loading-overlay" aria-hidden="true" role="alert" aria-live="assertive">
   <div class="loading-spinner">
     <div class="spinner-ring"></div>
     <div class="spinner-ring"></div>
@@ -588,50 +675,56 @@
 </div>
 
 <!-- ═══════════════════════════  FIREBASE AUTH OVERLAY  ═══════════════════════════ -->
-<div id="auth-overlay" style="display: none;">
+<div id="auth-overlay" class="auth-overlay" style="display: none;" aria-hidden="true">
+  <div class="auth-sparkles" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+
   <div class="auth-card">
     <div class="auth-header">
-      <div class="logo-icon">
-        <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="url(#lg1)"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linecap="round"/><circle cx="24" cy="10" r="2.5" fill="#fff"/><defs><linearGradient id="lg1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs></svg>
+      <div class="auth-brand" aria-hidden="true">
+        <div class="auth-brand-mark">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="9" fill="#0B3D4A"/>
+            <path class="auth-brand-path" d="M8 20 L13 13 L18 17 L24 10" stroke="#F2E8D5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle class="auth-brand-dot" cx="24" cy="10" r="2.4" fill="#E8A838"/>
+          </svg>
+        </div>
+        <span class="auth-brand-name">ChurnSight</span>
       </div>
-      <h2>Welcome to ChurnSight</h2>
-      <p id="auth-subtitle">Sign in to access your Churn Prediction Dashboard</p>
+      <h2 class="auth-title">Welcome back</h2>
+      <p id="auth-subtitle" class="auth-subtitle">Sign in to access your churn prediction workspace</p>
     </div>
 
-    <!-- Tab Selection -->
     <div class="auth-tabs">
-      <button class="auth-tab active" id="tab-login">Sign In</button>
-      <button class="auth-tab" id="tab-register">Register</button>
+      <button class="auth-tab active" id="tab-login" type="button">Sign In</button>
+      <button class="auth-tab" id="tab-register" type="button">Register</button>
     </div>
 
-    <!-- Email & Password Form -->
     <form id="auth-form" class="auth-form">
-      <div class="form-group">
+      <div class="form-group auth-field" style="--i:0">
         <label for="auth-email">Email Address</label>
         <div class="input-with-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <input type="email" id="auth-email" placeholder="name@company.com" required />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <input type="email" id="auth-email" placeholder="name@company.com" required autocomplete="email" />
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group auth-field" style="--i:1">
         <label for="auth-password">Password</label>
         <div class="input-with-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-          <input type="password" id="auth-password" placeholder="••••••••" required />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          <input type="password" id="auth-password" placeholder="••••••••" required autocomplete="current-password" />
         </div>
       </div>
-      <button type="submit" class="btn-primary btn-full" id="auth-submit-btn">
+      <button type="submit" class="btn-primary btn-full auth-field" id="auth-submit-btn" style="--i:2">
         <span id="submit-btn-text">Sign In</span>
       </button>
     </form>
 
-    <div class="auth-divider">
-      <span>or continue with</span>
-    </div>
+    <div class="auth-divider auth-field" style="--i:3"><span>or continue with</span></div>
 
-    <!-- Google Login Button -->
-    <button class="btn-google btn-full" id="google-login-btn">
-      <svg class="google-icon" viewBox="0 0 24 24">
+    <button class="btn-google btn-full auth-field" id="google-login-btn" type="button" style="--i:4">
+      <svg class="google-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
         <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.54 15.01 0 12 0 7.35 0 3.37 2.67 1.44 6.56l3.86 3c.9-2.69 3.42-4.52 6.7-4.52z"/>
         <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.44h6.44c-.28 1.44-1.09 2.66-2.31 3.48l3.6 2.79c2.1-1.94 3.76-4.8 3.76-8.37z"/>
         <path fill="#FBBC05" d="M5.3 14.44A7.16 7.16 0 014.9 12c0-.85.15-1.67.4-2.44L1.44 6.56C.52 8.42 0 10.15 0 12s.52 3.58 1.44 5.44l3.86-3z"/>
@@ -723,6 +816,42 @@
       </div>
     </div>
   </section>
+
+<!-- Toast (body level so it shows on every section) -->
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<!-- Command palette -->
+<div class="palette-overlay" id="palette" aria-hidden="true">
+  <div class="palette-panel" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-input-row">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="palette-input" type="text" placeholder="Jump to a page, run an action, or find a customer…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" />
+      <kbd>Esc</kbd>
+    </div>
+    <ul class="palette-list" id="palette-list" role="listbox"></ul>
+    <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> select</span><span><kbd>?</kbd> shortcuts</span></div>
+  </div>
+</div>
+
+<div class="palette-overlay" id="shortcuts" aria-hidden="true">
+  <div class="palette-panel shortcuts-panel" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <h3 class="shortcuts-title">Keyboard shortcuts</h3>
+    <dl class="shortcuts-grid">
+      <dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Command palette</dd>
+      <dt><kbd>/</kbd></dt><dd>Search customers</dd>
+      <dt><kbd>?</kbd></dt><dd>This help</dd>
+      <dt><kbd>g</kbd> then <kbd>u</kbd></dt><dd>Upload &amp; train</dd>
+      <dt><kbd>g</kbd> then <kbd>o</kbd></dt><dd>Overview</dd>
+      <dt><kbd>g</kbd> then <kbd>h</kbd></dt><dd>Health scores</dd>
+      <dt><kbd>g</kbd> then <kbd>c</kbd></dt><dd>Cohorts</dd>
+      <dt><kbd>g</kbd> then <kbd>a</kbd></dt><dd>Alerts</dd>
+      <dt><kbd>g</kbd> then <kbd>n</kbd></dt><dd>Analytics</dd>
+      <dt><kbd>g</kbd> then <kbd>t</kbd></dt><dd>Customers</dd>
+      <dt><kbd>g</kbd> then <kbd>p</kbd></dt><dd>Predict single</dd>
+      <dt><kbd>d</kbd></dt><dd>Toggle dark theme</dd>
+    </dl>
+  </div>
+</div>
 
 <script type="module" src="src/main.js"></script>
 </body>

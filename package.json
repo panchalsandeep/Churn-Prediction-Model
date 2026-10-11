@@ -4,9 +4,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "api": "python api/index.py",
+    "retrain-model": "python scripts/retrain_default_model.py",
+    "test:api": "python -m pytest tests -q"
   },
   "dependencies": {
+    "chart.js": "^4.4.3",
     "firebase": "^12.14.0"
   },
   "devDependencies": {

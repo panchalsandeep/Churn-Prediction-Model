@@ -2,36 +2,21 @@
    ChurnSight  –  Frontend Application (Modular Firebase SDK)
 ═══════════════════════════════════════════════════════════════ */
 
-// ── Firebase Modular SDK Imports ─────────────────────────────────────────────
-import { initializeApp } from 'firebase/app';
-import { getAnalytics } from 'firebase/analytics';
+import '../static/style.css';
+
+import { loadChart, chartTheme } from './lib/charts.js';
+import { loadFirebase } from './lib/firebase.js';
+import { initTheme, onThemeChange, toggleTheme } from './lib/theme.js';
+import { initPalette } from './lib/palette.js';
+import { createWhatIf } from './lib/whatif.js';
 import {
-  getAuth,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-  signInWithPopup,
-  GoogleAuthProvider,
-  signOut,
-} from 'firebase/auth';
+  animateNumber, tween, replay, stagger, debounce, prefersReducedMotion,
+} from './lib/motion.js';
 
-// ── Firebase Configuration ───────────────────────────────────────────────────
-const firebaseConfig = {
-  apiKey: "AIzaSyBdsEwt7eAmBjtGDk_ns68QSrTK77mpWkQ",
-  authDomain: "churn-prediction-model-ai.firebaseapp.com",
-  projectId: "churn-prediction-model-ai",
-  storageBucket: "churn-prediction-model-ai.firebasestorage.app",
-  messagingSenderId: "24302908104",
-  appId: "1:24302908104:web:8a907a48ea41ccbbad6bfd",
-  measurementId: "G-SP7GXCV9J2"
-};
+// Chart.js and Firebase are loaded on demand; these are filled in once ready.
+let Chart = null;
+let fb = null;
 
-// ── Initialize Firebase ──────────────────────────────────────────────────────
-const firebaseApp = initializeApp(firebaseConfig);
-const analytics   = getAnalytics(firebaseApp);
-const auth        = getAuth(firebaseApp);
-
-// ── API Base URL ─────────────────────────────────────────────────────────────
 const API = '/api';
 
 /* ── State ──────────────────────────────────────────────────── */
@@ -43,7 +28,10 @@ let state = {
   allCustomers      : [],
   filteredCustomers : [],
   currentPage       : 1,
-  pageSize          : 20,
+  pageSize          : Number(safeStorage('churnsight-page-size')) || 20,
+  sort              : { key: null, dir: 'asc' },
+  selected          : new Set(),
+  chartsDirty       : new Set(),
   riskFilter        : 'All',
   healthFilter      : 'All',
   alertTab          : 'Open',
@@ -61,6 +49,33 @@ let state = {
     modelStatus: null
   }
 };
+
+function safeStorage(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch { /* storage may be blocked */ }
+  return null;
+}
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function authHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (state.user) {
+    // The SDK caches the token and refreshes it shortly before expiry, so no forced round-trip.
+    state.idToken = await state.user.getIdToken();
+  }
+  if (state.idToken) headers.Authorization = `Bearer ${state.idToken}`;
+  return headers;
+}
 
 /* ── DOM helpers ─────────────────────────────────────────────── */
 const $  = id => document.getElementById(id);
@@ -80,48 +95,104 @@ const titles   = {
   admin    : 'Admin Console'
 };
 
-function navigateTo(section) {
-  sections.forEach(s => {
-    const navItem = $(`nav-${s}`);
-    $(`section-${s}`).classList.toggle('active', s === section);
-    navItem.classList.toggle('active', s === section);
-    if (s === section) {
-      navItem.setAttribute('aria-current', 'page');
-    } else {
-      navItem.removeAttribute('aria-current');
-    }
+let currentSection = 'upload';
+let navLock = false;
+
+/* Elements that fade/slide in (staggered) whenever their section opens. */
+const REVEAL_SELECTOR = [
+  '.reveal', '.card', '.kpi-card', '.insight-tile', '.upload-hero', '.health-header',
+  '.cohort-toolbar', '.alerts-toolbar', '.customers-toolbar',
+].join(',');
+
+function revealSection(section) {
+  const root = $(`section-${section}`);
+  const nodes = Array.from(root.querySelectorAll(REVEAL_SELECTOR))
+    .filter(node => !node.parentElement.closest(REVEAL_SELECTOR) || node.classList.contains('reveal'));
+  nodes.forEach((node, i) => {
+    node.style.setProperty('--delay', String(Math.min(i, 9)));
+    replay(node, 'reveal');
   });
-  $('page-title').textContent = titles[section];
+}
 
-  if (section === 'admin') {
-    loadAdminPanel();
+function moveNavIndicator() {
+  const indicator = $('nav-indicator');
+  const active = document.querySelector('.nav-item.active');
+  if (!indicator || !active) return;
+  indicator.style.transform = `translateY(${active.offsetTop}px)`;
+  indicator.style.height = `${active.offsetHeight}px`;
+  indicator.classList.add('is-ready');
+}
+
+function setPageTitle(text) {
+  const el = $('page-title');
+  el.textContent = text;
+  replay(el, 'title-swap');
+}
+
+function navigateTo(section) {
+  if (navLock) return;
+
+  const apply = () => {
+    sections.forEach(s => {
+      const navItem = $(`nav-${s}`);
+      const el = $(`section-${s}`);
+      el.classList.remove('is-leaving');
+      el.classList.toggle('active', s === section);
+      navItem.classList.toggle('active', s === section);
+      if (s === section) navItem.setAttribute('aria-current', 'page');
+      else navItem.removeAttribute('aria-current');
+    });
+    currentSection = section;
+    setPageTitle(titles[section]);
+    moveNavIndicator();
+    revealSection(section);
+    renderSectionCharts(section);
+    if (section === 'admin') loadAdminPanel();
+    if (window.innerWidth <= 768) {
+      document.querySelector('.sidebar').classList.remove('open');
+    }
+    window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    navLock = false;
+  };
+
+  const leaving = $(`section-${currentSection}`);
+  if (section === currentSection || prefersReducedMotion() || !leaving?.classList.contains('active')) {
+    apply();
+    return;
   }
 
-  if (window.innerWidth <= 768) {
-    document.querySelector('.sidebar').classList.remove('open');
+  navLock = true;
+  leaving.classList.add('is-leaving');
+  leaving.classList.remove('active');
+  window.setTimeout(apply, 180);
+}
+
+/** Navigation with the same guards as clicking the sidebar. */
+function requestNavigate(sec) {
+  if (sec === 'admin' && !state.admin.isAdmin) {
+    showToast('Admin access is restricted to administrators only.', 'error');
+    return;
   }
+  if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin') {
+    showToast('Please upload data and train a model first.', 'error');
+    return;
+  }
+  navigateTo(sec);
 }
 
 document.querySelectorAll('.nav-item').forEach(el => {
   el.addEventListener('click', e => {
     e.preventDefault();
-    const sec = el.dataset.section;
-    if (sec === 'admin' && !state.admin.isAdmin) {
-      showToast('Admin access is restricted to administrators only.', 'error');
-      return;
-    }
-    if (!state.modelTrained && sec !== 'upload' && sec !== 'predict' && sec !== 'admin') {
-      showToast('Please upload data and train a model first.', 'error');
-      return;
-    }
-    navigateTo(sec);
+    requestNavigate(el.dataset.section);
   });
 });
+window.addEventListener('resize', debounce(moveNavIndicator, 120));
 
 function updateAdminNavigation() {
   const adminNav = $('nav-admin');
   if (!adminNav) return;
   adminNav.style.display = state.admin.isAdmin ? 'flex' : 'none';
+  moveNavIndicator();
 }
 
 
@@ -131,6 +202,7 @@ $('menu-toggle').addEventListener('click', () => {
 
 /* ══════════════════  CLOCK  ═══════════════════════════════════ */
 function updateClock() {
+  if (document.hidden) return;
   $('time-display').textContent = new Date().toLocaleTimeString('en-IN', {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
@@ -165,6 +237,7 @@ function setFile(file) {
   $('file-name-display').textContent = file.name;
   $('file-size-display').textContent = formatBytes(file.size);
   $('file-info').style.display = 'flex';
+  replay($('file-info'), 'pop-in');
   $('drop-zone').style.display = 'none';
   $('train-btn').disabled = false;
 }
@@ -174,6 +247,7 @@ $('remove-file').addEventListener('click', () => {
   fileInput.value = '';
   $('file-info').style.display = 'none';
   $('drop-zone').style.display = 'block';
+  replay($('drop-zone'), 'pop-in');
   $('train-btn').disabled = true;
 });
 
@@ -201,15 +275,7 @@ async function trainModel() {
 
   try {
     showProgress(30, 'Training model…');
-
-    // Refresh token before request
-    if (state.user) {
-      state.idToken = await state.user.getIdToken(true);
-    }
-
-    const headers = {};
-    if (state.idToken) headers['Authorization'] = `Bearer ${state.idToken}`;
-
+    const headers = await authHeaders();
     const res  = await fetch(`${API}/upload`, { method: 'POST', headers, body: fd });
     const data = await res.json();
 
@@ -220,18 +286,17 @@ async function trainModel() {
     }
 
     showProgress(80, 'Building visualizations…');
-    await sleep(400);
-    showProgress(100, 'Done!');
-    await sleep(500);
-
     state.results      = data;
     state.modelTrained = true;
     state.allCustomers = data.customers || [];
+    showProgress(100, 'Done!');
+    await sleep(250);
 
     hideLoading();
     updateModelStatus(data.summary.algorithm);
     populateDashboard(data);
-    showToast(`Model trained! Accuracy: ${data.metrics.accuracy}%`, 'success');
+    const source = data.metrics_source === 'holdout_test_set' ? 'holdout test' : 'evaluation';
+    showToast(`Model trained! ${source} accuracy: ${data.metrics.accuracy}%`, 'success');
     navigateTo('overview');
 
   } catch (err) {
@@ -242,57 +307,163 @@ async function trainModel() {
 
 /* ══════════════════  DASHBOARD POPULATION  ════════════════════ */
 function populateDashboard(data) {
-  const { metrics, summary, confusion_matrix: cm,
-          roc_curve: roc, prob_distribution: pd,
-          feature_importance: fi, trend_data: td } = data;
+  const { metrics, summary, confusion_matrix: cm } = data;
 
-  animateValue('kpi-total-val', 0, summary.total_customers, 800);
-  $('kpi-churn-val').textContent = summary.churn_rate + '%';
-  animateValue('kpi-high-val', 0, summary.high_risk, 800);
-  $('kpi-acc-val').textContent  = metrics.accuracy  + '%';
-  $('kpi-f1-val').textContent   = metrics.f1_score  + '%';
-  $('kpi-auc-val').textContent  = metrics.auc_roc   + '%';
+  const pct = v => `${(+v).toFixed(v % 1 ? 1 : 0)}%`;
+  animateNumber($('kpi-total-val'), summary.total_customers, { duration: 900 });
+  animateNumber($('kpi-high-val'), summary.high_risk, { duration: 900 });
+  animateNumber($('kpi-churn-val'), summary.churn_rate, { duration: 900, format: v => `${v.toFixed(1)}%` });
+  animateNumber($('kpi-acc-val'), metrics.accuracy, { duration: 1000, format: v => `${v.toFixed(1)}%` });
+  animateNumber($('kpi-f1-val'), metrics.f1_score, { duration: 1000, format: v => `${v.toFixed(1)}%` });
+  animateNumber($('kpi-auc-val'), metrics.auc_roc, { duration: 1000, format: v => `${v.toFixed(1)}%` });
+  $('kpi-total').classList.remove('is-skeleton');
 
   const badge = $('algo-badge');
   badge.textContent   = summary.algorithm;
   badge.style.display = 'flex';
+  replay(badge, 'pop-in');
 
-  buildTrendChart(td);
-  buildRiskDonut(summary);
-  buildProbDistChart(pd);
-  buildROCChart(roc);
-  buildFeatureChart(fi);
-  buildRingCharts(metrics);
+  animateNumber($('cm-tn'), cm[0][0], { duration: 800 });
+  animateNumber($('cm-fp'), cm[0][1], { duration: 800 });
+  animateNumber($('cm-fn'), cm[1][0], { duration: 800 });
+  animateNumber($('cm-tp'), cm[1][1], { duration: 800 });
 
-  $('cm-tn').textContent = cm[0][0];
-  $('cm-fp').textContent = cm[0][1];
-  $('cm-fn').textContent = cm[1][0];
-  $('cm-tp').textContent = cm[1][1];
+  $('ring-acc-val').textContent  = pct(metrics.accuracy);
+  $('ring-prec-val').textContent = pct(metrics.precision);
+  $('ring-rec-val').textContent  = pct(metrics.recall);
+  $('ring-f1-val').textContent   = pct(metrics.f1_score);
 
-  $('ring-acc-val').textContent  = metrics.accuracy  + '%';
-  $('ring-prec-val').textContent = metrics.precision + '%';
-  $('ring-rec-val').textContent  = metrics.recall    + '%';
-  $('ring-f1-val').textContent   = metrics.f1_score  + '%';
+  // Charts are built the first time their section is shown (and rebuilt after new data / theme change).
+  destroyAllCharts();
+  state.chartsDirty = new Set(['overview', 'analytics', 'cohorts']);
+  renderSectionCharts(currentSection);
 
-  state.filteredCustomers = [...state.allCustomers];
+  state.sort = { key: null, dir: 'asc' };
+  state.selected.clear();
+  state.currentPage = 1;
+  customerIndex.clear();
+  prepareCustomers();
   renderCustomerTable();
   renderHealthScores();
   buildCohortData();
   renderCohortView();
   initAlerts();
+  populateInsights(data);
+}
+
+function populateInsights(data) {
+  const customers = state.allCustomers || [];
+  const high = customers.filter(c => c.risk_level === 'High');
+  const revenue = high.reduce((sum, c) => sum + (Number(c.monthly) || 0), 0);
+  const driver = data.feature_importance?.[0];
+  const openAlerts = state.alerts?.Open?.length || 0;
+
+  if ($('overview-lede')) {
+    $('overview-lede').textContent = high.length
+      ? `${high.length} accounts need outreach now. Holdout accuracy ${data.metrics?.accuracy ?? '–'}% · ${data.summary?.test_size ?? '–'} test rows.`
+      : 'Portfolio looks stable. Keep monitoring tenure bands and support signals.';
+  }
+  if ($('insight-revenue')) {
+    $('insight-revenue').textContent = revenue
+      ? `$${Math.round(revenue).toLocaleString()}`
+      : '$0';
+    $('insight-revenue-meta').textContent = `${high.length} high-risk accounts × monthly charges`;
+  }
+  if ($('insight-driver')) {
+    $('insight-driver').textContent = driver
+      ? driver.feature.replace(/_/g, ' ')
+      : '—';
+    $('insight-driver-meta').textContent = driver
+      ? `Importance ${driver.importance}`
+      : 'Train a model to rank drivers';
+  }
+  if ($('insight-action')) {
+    $('insight-action').textContent = openAlerts
+      ? `Work ${openAlerts} open retention alerts`
+      : high.length
+        ? 'Prioritize high-risk CSM check-ins'
+        : 'Keep standard engagement cadence';
+    $('insight-action-meta').textContent = 'Derived from risk tiers + alert rules';
+  }
+}
+
+function exportCustomersCsv(rows = state.allCustomers, label = '') {
+  if (!rows.length) {
+    showToast('Train a model before exporting.', 'error');
+    return;
+  }
+  const headers = [
+    'id', 'risk_level', 'churn_prob', 'tenure', 'monthly', 'support',
+    'last_login', 'location', 'contract_type', 'payment_method', 'actual'
+  ];
+  const lines = [headers.join(',')];
+  rows.forEach(c => {
+    lines.push(headers.map(key => {
+      const raw = c[key] ?? '';
+      const value = String(raw).replace(/"/g, '""');
+      return `"${value}"`;
+    }).join(','));
+  });
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `churnsight-risk-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`Exported ${rows.length} ${label}customers.`, 'success');
 }
 
 /* ══════════════════  CHART BUILDERS  ══════════════════════════ */
-Chart.defaults.color       = '#94a3b8';
-Chart.defaults.font.family = 'Inter';
+const CHART_SECTIONS = {
+  overview : [() => buildTrendChart(state.results.trend_data), () => buildRiskDonut(state.results.summary)],
+  analytics: [
+    () => buildProbDistChart(state.results.prob_distribution),
+    () => buildROCChart(state.results.roc_curve),
+    () => buildFeatureChart(state.results.feature_importance),
+    () => buildRingCharts(state.results.metrics),
+  ],
+  cohorts  : [() => buildCohortTrendChart(), () => buildContractChart()],
+};
 
 function destroyChart(key) {
   if (state.charts[key]) { state.charts[key].destroy(); delete state.charts[key]; }
 }
+function destroyAllCharts() {
+  Object.keys(state.charts).forEach(destroyChart);
+}
+
+let animateCharts = true;
+const chartAnimation = (duration = 900) => (animateCharts && !prefersReducedMotion() ? { duration, easing: 'easeOutQuart' } : false);
+
+/** Build the charts for a section once, on first view (Chart.js itself loads lazily). */
+async function renderSectionCharts(section, { animate = true } = {}) {
+  if (!state.chartsDirty.has(section) || !state.results) return;
+  state.chartsDirty.delete(section);
+  try {
+    Chart = await loadChart();
+  } catch (err) {
+    state.chartsDirty.add(section);
+    showToast('Could not load the charting library. Check your connection.', 'error');
+    return;
+  }
+  if (section === 'cohorts' && !state.cohorts) return;
+  animateCharts = animate;
+  CHART_SECTIONS[section].forEach(build => build());
+}
+
+function axisTitle(text) {
+  return { display: true, text, color: chartTheme().title };
+}
 
 function buildTrendChart(td) {
   destroyChart('trend');
+  const note = $('trend-note');
+  if (note) note.textContent = td.note || 'Churn rate by tenure band on the uploaded dataset.';
   const ctx = $('trendChart').getContext('2d');
+  const t = chartTheme();
+  const red = t.dark ? '#E26B6B' : '#C23B3B';
+  const teal = t.dark ? '#4DB8B3' : '#147A7A';
   state.charts.trend = new Chart(ctx, {
     type: 'line',
     data: {
@@ -301,54 +472,65 @@ function buildTrendChart(td) {
         {
           label: 'Churn Rate %',
           data: td.churn_rate,
-          borderColor: '#f87171',
-          backgroundColor: 'rgba(248,113,113,0.08)',
-          tension: 0.4, fill: true,
-          pointBackgroundColor: '#f87171', pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5,
+          borderColor: red,
+          backgroundColor: 'rgba(194,59,59,0.10)',
+          tension: 0.35, fill: true,
+          pointBackgroundColor: red, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5,
         },
         {
           label: 'Retention %',
           data: td.retained,
-          borderColor: '#34d399',
-          backgroundColor: 'rgba(52,211,153,0.06)',
-          tension: 0.4, fill: true,
-          pointBackgroundColor: '#34d399', pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5,
+          borderColor: teal,
+          backgroundColor: 'rgba(20,122,122,0.08)',
+          tension: 0.35, fill: true,
+          pointBackgroundColor: teal, pointRadius: 4, pointHoverRadius: 6, borderWidth: 2.5,
         },
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation: chartAnimation(1100),
+      interaction: { mode: 'index', intersect: false },
       plugins: {
-        legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10, padding: 18 } },
+        legend: { position: 'top', labels: { usePointStyle: true, pointStyleWidth: 10, padding: 18, color: t.text } },
         tooltip: tooltipStyle(),
       },
       scales: {
-        x: gridStyle(),
-        y: { ...gridStyle(), min: 0, max: 100, ticks: { callback: v => v + '%' } },
+        x: { ...gridStyle(), title: axisTitle('Tenure band') },
+        y: {
+          ...gridStyle(),
+          min: 0,
+          max: 100,
+          title: axisTitle('Rate (%)'),
+          ticks: { ...gridStyle().ticks, callback: v => v + '%' },
+        },
       },
     },
   });
 }
 
 function buildRiskDonut(summary) {
-  const donutLegend = $('donut-legend');
-  donutLegend.setAttribute('role', 'list');
   destroyChart('donut');
   const ctx    = $('riskDonutChart').getContext('2d');
   const labels = ['High Risk', 'Medium Risk', 'Low Risk'];
   const data   = [summary.high_risk, summary.medium_risk, summary.low_risk];
-  const colors = ['#f87171', '#fb923c', '#34d399'];
+  const dark   = chartTheme().dark;
+  const colors = dark ? ['#E26B6B', '#F0993A', '#3FBF86'] : ['#C23B3B', '#D97706', '#1F8A5B'];
 
   state.charts.donut = new Chart(ctx, {
     type: 'doughnut',
     data: { labels, datasets: [{ data, backgroundColor: colors, borderColor: 'transparent', hoverOffset: 8, borderWidth: 0 }] },
     options: {
       responsive: true, maintainAspectRatio: false, cutout: '72%',
+      animation: animateCharts && !prefersReducedMotion()
+        ? { animateRotate: true, animateScale: true, duration: 1100, easing: 'easeOutQuart' } : false,
       plugins: { legend: { display: false }, tooltip: tooltipStyle() },
     },
   });
 
-  $('donut-legend').innerHTML = labels.map((l, i) => `
+  const donutLegend = $('donut-legend');
+  donutLegend.setAttribute('role', 'list');
+  donutLegend.innerHTML = labels.map((l, i) => `
     <div class="legend-item" role="listitem">
       <div class="legend-dot" style="background:${colors[i]}"></div>
       <span>${l}: <b>${data[i]}</b></span>
@@ -371,10 +553,11 @@ function buildProbDistChart(pd) {
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation: chartAnimation(900),
       plugins: { legend: { display: false }, tooltip: tooltipStyle() },
       scales: {
-        x: { ...gridStyle(), title: { display: true, text: 'Churn Probability Range', color: '#64748b' } },
-        y: { ...gridStyle(), title: { display: true, text: 'Number of Customers', color: '#64748b' } },
+        x: { ...gridStyle(), title: axisTitle('Churn Probability Range') },
+        y: { ...gridStyle(), title: axisTitle('Number of Customers') },
       },
     },
   });
@@ -383,6 +566,7 @@ function buildProbDistChart(pd) {
 function buildROCChart(roc) {
   destroyChart('roc');
   const ctx = $('rocChart').getContext('2d');
+  const t = chartTheme();
   state.charts.roc = new Chart(ctx, {
     type: 'line',
     data: {
@@ -390,23 +574,24 @@ function buildROCChart(roc) {
         {
           label: 'ROC Curve',
           data: roc.fpr.map((x, i) => ({ x, y: roc.tpr[i] })),
-          borderColor: '#818cf8', backgroundColor: 'rgba(129,140,248,0.08)',
+          borderColor: t.primary, backgroundColor: t.dark ? 'rgba(127,209,207,0.10)' : 'rgba(11,61,74,0.08)',
           fill: true, tension: 0.3, pointRadius: 0, borderWidth: 2.5,
         },
         {
           label: 'Random Classifier',
           data: [{ x: 0, y: 0 }, { x: 1, y: 1 }],
-          borderColor: 'rgba(255,255,255,0.12)', borderDash: [6, 4],
+          borderColor: t.reference, borderDash: [6, 4],
           pointRadius: 0, borderWidth: 1.5, fill: false,
         },
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 14 } }, tooltip: tooltipStyle() },
+      animation: chartAnimation(1200),
+      plugins: { legend: { position: 'top', labels: { usePointStyle: true, padding: 14, color: t.text } }, tooltip: tooltipStyle() },
       scales: {
-        x: { ...gridStyle(), type: 'linear', min: 0, max: 1, title: { display: true, text: 'False Positive Rate', color: '#64748b' } },
-        y: { ...gridStyle(), min: 0, max: 1, title: { display: true, text: 'True Positive Rate', color: '#64748b' } },
+        x: { ...gridStyle(), type: 'linear', min: 0, max: 1, title: axisTitle('False Positive Rate') },
+        y: { ...gridStyle(), min: 0, max: 1, title: axisTitle('True Positive Rate') },
       },
     },
   });
@@ -416,6 +601,7 @@ function buildFeatureChart(fi) {
   destroyChart('feature');
   const ctx = $('featureChart').getContext('2d');
   const top = fi.slice(0, 10);
+  const light = chartTheme().dark ? 58 : 36;
   state.charts.feature = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -423,15 +609,16 @@ function buildFeatureChart(fi) {
       datasets: [{
         label: 'Importance',
         data: top.map(f => f.importance),
-        backgroundColor: top.map((_, i) => `hsla(${240 + i * 12}, 70%, 65%, 0.8)`),
+        backgroundColor: top.map((_, i) => `hsla(${168 + i * 8}, 42%, ${light}%, 0.85)`),
         borderRadius: 6, borderSkipped: false,
       }],
     },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      animation: chartAnimation(900),
       plugins: { legend: { display: false }, tooltip: tooltipStyle() },
       scales: {
-        x: { ...gridStyle(), title: { display: true, text: 'Importance Score', color: '#64748b' } },
+        x: { ...gridStyle(), title: axisTitle('Importance Score') },
         y: gridStyle(),
       },
     },
@@ -439,144 +626,312 @@ function buildFeatureChart(fi) {
 }
 
 function buildRingCharts(metrics) {
+  const t = chartTheme();
   const rings = [
-    { canvas: 'ringAccCanvas',  value: metrics.accuracy,  color: '#34d399' },
-    { canvas: 'ringPrecCanvas', value: metrics.precision, color: '#60a5fa' },
-    { canvas: 'ringRecCanvas',  value: metrics.recall,    color: '#f59e0b' },
-    { canvas: 'ringF1Canvas',   value: metrics.f1_score,  color: '#a78bfa' },
+    { canvas: 'ringAccCanvas',  value: metrics.accuracy,  color: t.dark ? '#3FBF86' : '#1F8A5B' },
+    { canvas: 'ringPrecCanvas', value: metrics.precision, color: t.dark ? '#6B9BFF' : '#2F6FED' },
+    { canvas: 'ringRecCanvas',  value: metrics.recall,    color: t.dark ? '#F0993A' : '#D97706' },
+    { canvas: 'ringF1Canvas',   value: metrics.f1_score,  color: t.dark ? '#4DB8B3' : '#147A7A' },
   ];
-  rings.forEach(({ canvas, value, color }) => {
+  rings.forEach(({ canvas, value, color }, i) => {
     destroyChart(canvas);
     const ctx = $(canvas).getContext('2d');
     state.charts[canvas] = new Chart(ctx, {
       type: 'doughnut',
-      data: { datasets: [{ data: [value, 100 - value], backgroundColor: [color, 'rgba(255,255,255,0.05)'], borderWidth: 0, hoverOffset: 0 }] },
+      data: { datasets: [{ data: [value, 100 - value], backgroundColor: [color, t.track], borderWidth: 0, hoverOffset: 0 }] },
       options: {
         responsive: false, cutout: '78%',
-        animation: { animateRotate: true, duration: 900 },
+        animation: animateCharts && !prefersReducedMotion()
+          ? { animateRotate: true, duration: 1000, delay: i * 120, easing: 'easeOutQuart' } : false,
         plugins: { legend: { display: false }, tooltip: { enabled: false } },
       },
     });
   });
 }
 
-/* ══════════════════  GAUGE CHART  ════════════════════════════ */
-function drawGauge(canvas, probability) {
-  const ctx = $(canvas).getContext('2d');
-  const W = 220, H = 130, cx = W / 2, cy = H - 18, r = 90;
+/* Rebuild whatever is on screen when the theme flips; other sections rebuild on next visit. */
+onThemeChange(() => {
+  if (!state.results) return;
+  destroyAllCharts();
+  state.chartsDirty = new Set(['overview', 'analytics', 'cohorts']);
+  renderSectionCharts(currentSection, { animate: false });
+  if (gaugeState.probability != null) drawGauge('gaugeCanvas', gaugeState.probability);
+});
 
+/* ══════════════════  GAUGE CHART  ════════════════════════════ */
+const gaugeState = { probability: null, cancel: null };
+
+function drawGauge(canvas, probability) {
+  const el = $(canvas);
+  const ctx = el.getContext('2d');
+  const t = chartTheme();
+  // Crisp on high-DPI screens: size the backing store once, then draw in CSS pixels.
+  const W = 220, H = 130, cx = W / 2, cy = H - 18, r = 90;
+  const dpr = window.devicePixelRatio || 1;
+  if (el.width !== W * dpr) {
+    el.width = W * dpr; el.height = H * dpr;
+    el.style.width = `${W}px`; el.style.height = `${H}px`;
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W, H);
 
   ctx.beginPath();
   ctx.arc(cx, cy, r, Math.PI, 0, false);
-  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.strokeStyle = t.track;
   ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
 
-  const pct  = probability / 100;
+  const pct  = Math.max(0, Math.min(1, probability / 100));
   const end  = Math.PI + pct * Math.PI;
   const grad = ctx.createLinearGradient(cx - r, cy, cx + r, cy);
   if (probability >= 70) {
-    grad.addColorStop(0, '#fbbf24'); grad.addColorStop(1, '#f87171');
+    grad.addColorStop(0, '#E8A838'); grad.addColorStop(1, '#C23B3B');
   } else if (probability >= 40) {
-    grad.addColorStop(0, '#34d399'); grad.addColorStop(1, '#fbbf24');
+    grad.addColorStop(0, '#1F8A5B'); grad.addColorStop(1, '#E8A838');
   } else {
-    grad.addColorStop(0, '#60a5fa'); grad.addColorStop(1, '#34d399');
+    grad.addColorStop(0, '#2F6FED'); grad.addColorStop(1, '#1F8A5B');
   }
 
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, Math.PI, end, false);
-  ctx.strokeStyle = grad; ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
+  if (pct > 0) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI, end, false);
+    ctx.strokeStyle = grad; ctx.lineWidth = 16; ctx.lineCap = 'round'; ctx.stroke();
+  }
 
-  const needleAngle = Math.PI + pct * Math.PI;
-  const nx = cx + (r - 26) * Math.cos(needleAngle);
-  const ny = cy + (r - 26) * Math.sin(needleAngle);
-  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(nx, ny);
-  ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
+  // Marker at the end of the arc (a needle would cross the percentage label).
+  const mx = cx + r * Math.cos(end);
+  const my = cy + r * Math.sin(end);
+  ctx.beginPath(); ctx.arc(mx, my, 10, 0, Math.PI * 2);
+  ctx.fillStyle = t.dark ? '#142127' : '#FAF7F0'; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = t.tooltipTitle; ctx.stroke();
 
-  ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-  ctx.fillStyle = '#fff'; ctx.fill();
-
-  ctx.font = '500 10px Inter'; ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.textAlign = 'center';
+  ctx.font = '500 10px "IBM Plex Sans"'; ctx.fillStyle = t.title; ctx.textAlign = 'center';
   ctx.fillText('0%',   cx - r + 4, cy + 18);
   ctx.fillText('50%',  cx,          cy - r - 8);
   ctx.fillText('100%', cx + r - 4, cy + 18);
 }
 
+/** Sweep the needle from its current position to the new probability. */
+function animateGauge(probability) {
+  gaugeState.cancel?.();
+  const from = gaugeState.probability ?? 0;
+  gaugeState.probability = probability;
+  const label = $('gauge-val');
+  gaugeState.cancel = tween(from === 0 ? 1100 : 600, t => {
+    const value = from + (probability - from) * t;
+    drawGauge('gaugeCanvas', value);
+    label.textContent = value.toFixed(1) + '%';
+  });
+}
+
 /* ══════════════════  CUSTOMER TABLE  ════════════════════════ */
-function renderCustomerTable() {
-  let data = [...state.allCustomers];
-  if (state.riskFilter !== 'All') data = data.filter(c => c.risk_level === state.riskFilter);
+const RISK_RANK = { High: 3, Medium: 2, Low: 1 };
+
+/** Precompute search text and sort ranks once per dataset instead of on every keystroke. */
+function prepareCustomers() {
+  state.allCustomers.forEach(c => {
+    c._q = [c.id, c.location, c.contract_type, c.payment_method].filter(Boolean).join(' ').toLowerCase();
+    c._rank = RISK_RANK[c.risk_level] || 0;
+  });
+}
+
+function sortValue(c, key) {
+  if (key === 'id') return String(c.id).toLowerCase();
+  if (key === 'risk_level') return c._rank;
+  return Number(c[key]) || 0;
+}
+
+function getVisibleRows() {
+  let rows = state.allCustomers;
+  if (state.riskFilter !== 'All') rows = rows.filter(c => c.risk_level === state.riskFilter);
   if (state.searchQuery) {
     const q = state.searchQuery.toLowerCase();
-    data = data.filter(c => c.id.toLowerCase().includes(q));
+    rows = rows.filter(c => c._q.includes(q));
   }
+  const { key, dir } = state.sort;
+  if (key) {
+    const sign = dir === 'asc' ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      const av = sortValue(a, key), bv = sortValue(b, key);
+      return av < bv ? -sign : av > bv ? sign : 0;
+    });
+  }
+  return rows;
+}
 
+const SKELETON_ROW = `<tr class="skeleton-row" aria-hidden="true">${
+  '<td><span class="skeleton"></span></td>'.repeat(9)}</tr>`;
+
+function showTableSkeleton(rows = 8) {
+  $('customer-tbody').innerHTML = SKELETON_ROW.repeat(rows);
+  document.querySelectorAll('.kpi-card .kpi-value').forEach(el => el.classList.add('is-skeleton'));
+}
+function clearSkeleton() {
+  document.querySelectorAll('.kpi-card .kpi-value.is-skeleton').forEach(el => el.classList.remove('is-skeleton'));
+}
+
+function renderCustomerTable({ animate = true } = {}) {
+  clearSkeleton();
+  const data = getVisibleRows();
   state.filteredCustomers = data;
   const total = data.length;
-  const pages = Math.ceil(total / state.pageSize);
+  const pages = Math.max(1, Math.ceil(total / state.pageSize));
+  state.currentPage = Math.min(state.currentPage, pages);
   const start = (state.currentPage - 1) * state.pageSize;
   const paged = data.slice(start, start + state.pageSize);
 
-  $('customer-count').textContent = `Showing ${paged.length} of ${total} customers`;
+  $('customer-count').textContent = total
+    ? `Showing ${start + 1}–${start + paged.length} of ${total} customers`
+    : 'Showing 0 customers';
 
   const tbody = $('customer-tbody');
   if (!paged.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty-row">No customers match the current filters.</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="9" class="empty-row">${
+      state.allCustomers.length ? 'No customers match the current filters.' : 'No data loaded. Please train a model first.'
+    }</td></tr>`;
   } else {
     tbody.innerHTML = paged.map(c => {
       const fillClass = c.risk_level === 'High' ? 'fill-high' : c.risk_level === 'Medium' ? 'fill-medium' : 'fill-low';
+      const id = escapeHtml(c.id);
+      const risk = escapeHtml(c.risk_level);
+      const prob = Number(c.churn_prob) || 0;
+      const checked = state.selected.has(c.id);
       return `
-        <tr class="customer-row" data-customer-id="${c.id}">
-          <td><strong>${c.id}</strong></td>
-          <td><span class="risk-tag ${c.risk_level}">${c.risk_level}</span></td>
+        <tr class="customer-row${checked ? ' is-selected' : ''}" data-customer-id="${id}" tabindex="0" aria-selected="${checked}">
+          <td class="col-select"><input type="checkbox" class="row-check" aria-label="Select ${id}" ${checked ? 'checked' : ''} /></td>
+          <td><strong>${id}</strong></td>
+          <td><span class="risk-tag ${risk}">${risk}</span></td>
           <td>
             <div class="prob-bar-wrap">
               <div class="prob-mini-bar">
-                <div class="prob-mini-fill ${fillClass}" style="width:${c.churn_prob}%"></div>
+                <div class="prob-mini-fill ${fillClass}" style="width:${prob}%"></div>
               </div>
-              <span>${c.churn_prob}%</span>
+              <span>${prob}%</span>
             </div>
           </td>
-          <td>${c.tenure} mo</td>
-          <td>$${c.monthly.toFixed(2)}</td>
-          <td>${c.support}</td>
-          <td>${c.last_login} days</td>
+          <td>${Number(c.tenure) || 0} mo</td>
+          <td>$${(Number(c.monthly) || 0).toFixed(2)}</td>
+          <td>${Number(c.support) || 0}</td>
+          <td>${Number(c.last_login) || 0} days</td>
           <td>${c.actual === 1
             ? '<span class="churn-yes">● Churned</span>'
             : '<span class="churn-no">● Retained</span>'
           }</td>
         </tr>`;
     }).join('');
-    tbody.querySelectorAll('.customer-row').forEach(row => {
-      row.addEventListener('click', () => showCustomerDrawer(row.dataset.customerId));
-    });
+    if (animate) {
+      const rows = tbody.querySelectorAll('.customer-row');
+      stagger(rows, 16);
+      rows.forEach(row => row.classList.add('row-in'));
+    }
   }
   renderPagination(pages);
+  syncSortHeaders();
+  syncSelectionUi();
 }
 
 function renderPagination(pages) {
   const wrap = $('table-pagination');
   if (pages <= 1) { wrap.innerHTML = ''; return; }
+  const cur = state.currentPage;
 
-  let html = `<button class="page-btn" ${state.currentPage === 1 ? 'disabled' : ''} data-page="${state.currentPage - 1}">‹ Prev</button>`;
-  for (let i = 1; i <= pages; i++) {
-    if (pages > 7 && i > 3 && i < pages - 1 && Math.abs(i - state.currentPage) > 1) {
-      if (i === 4) html += '<span style="color:var(--text-3);padding:0 4px">…</span>';
-      continue;
-    }
-    html += `<button class="page-btn ${i === state.currentPage ? 'active' : ''}" data-page="${i}">${i}</button>`;
-  }
-  html += `<button class="page-btn" ${state.currentPage === pages ? 'disabled' : ''} data-page="${state.currentPage + 1}">Next ›</button>`;
+  // 1 … cur-1 cur cur+1 … last
+  const shown = new Set([1, pages, cur - 1, cur, cur + 1].filter(n => n >= 1 && n <= pages));
+  let html = `<button class="page-btn" ${cur === 1 ? 'disabled' : ''} data-page="${cur - 1}">‹ Prev</button>`;
+  let prev = 0;
+  [...shown].sort((a, b) => a - b).forEach(n => {
+    if (n - prev > 1) html += '<span class="page-gap" aria-hidden="true">…</span>';
+    html += `<button class="page-btn ${n === cur ? 'active' : ''}" data-page="${n}" ${n === cur ? 'aria-current="page"' : ''}>${n}</button>`;
+    prev = n;
+  });
+  html += `<button class="page-btn" ${cur === pages ? 'disabled' : ''} data-page="${cur + 1}">Next ›</button>`;
   wrap.innerHTML = html;
+}
 
-  wrap.querySelectorAll('.page-btn[data-page]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      state.currentPage = parseInt(btn.dataset.page);
-      renderCustomerTable();
-    });
+$('table-pagination').addEventListener('click', e => {
+  const btn = e.target.closest('.page-btn[data-page]');
+  if (!btn || btn.disabled) return;
+  state.currentPage = parseInt(btn.dataset.page, 10);
+  renderCustomerTable();
+  $('customer-table').scrollIntoView({ block: 'nearest', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+});
+
+/* Sorting */
+function syncSortHeaders() {
+  document.querySelectorAll('.sort-btn').forEach(btn => {
+    const active = state.sort.key === btn.dataset.sort;
+    btn.dataset.dir = active ? state.sort.dir : '';
+    btn.closest('th').setAttribute('aria-sort', active ? (state.sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
   });
 }
 
+document.querySelector('#customer-table thead').addEventListener('click', e => {
+  const btn = e.target.closest('.sort-btn');
+  if (!btn) return;
+  const key = btn.dataset.sort;
+  // asc -> desc -> unsorted
+  if (state.sort.key !== key) state.sort = { key, dir: 'asc' };
+  else if (state.sort.dir === 'asc') state.sort = { key, dir: 'desc' };
+  else state.sort = { key: null, dir: 'asc' };
+  state.currentPage = 1;
+  renderCustomerTable();
+});
+
+/* Selection + bulk actions */
+function syncSelectionUi() {
+  const bar = $('bulk-bar');
+  const count = state.selected.size;
+  $('bulk-count').textContent = `${count} selected`;
+  if (count && bar.hidden) { bar.hidden = false; replay(bar, 'pop-in'); }
+  else if (!count) bar.hidden = true;
+
+  const checks = [...document.querySelectorAll('#customer-tbody .row-check')];
+  const selectedOnPage = checks.filter(c => c.checked).length;
+  const all = $('select-all');
+  all.checked = checks.length > 0 && selectedOnPage === checks.length;
+  all.indeterminate = selectedOnPage > 0 && selectedOnPage < checks.length;
+}
+
+$('customer-tbody').addEventListener('change', e => {
+  const check = e.target.closest('.row-check');
+  if (!check) return;
+  const row = check.closest('.customer-row');
+  const id = row.dataset.customerId;
+  if (check.checked) state.selected.add(id); else state.selected.delete(id);
+  row.classList.toggle('is-selected', check.checked);
+  row.setAttribute('aria-selected', String(check.checked));
+  syncSelectionUi();
+});
+
+$('select-all').addEventListener('change', e => {
+  document.querySelectorAll('#customer-tbody .customer-row').forEach(row => {
+    const on = e.target.checked;
+    if (on) state.selected.add(row.dataset.customerId); else state.selected.delete(row.dataset.customerId);
+    row.classList.toggle('is-selected', on);
+    row.setAttribute('aria-selected', String(on));
+    row.querySelector('.row-check').checked = on;
+  });
+  syncSelectionUi();
+});
+
+$('bulk-clear').addEventListener('click', () => { state.selected.clear(); renderCustomerTable({ animate: false }); });
+$('bulk-export').addEventListener('click', () => {
+  exportCustomersCsv(state.allCustomers.filter(c => state.selected.has(c.id)), 'selected ');
+});
+
+/* Opening the drawer: delegated, and keyboard accessible */
+$('customer-tbody').addEventListener('click', e => {
+  if (e.target.closest('.col-select')) return;
+  const row = e.target.closest('.customer-row');
+  if (row) showCustomerDrawer(row.dataset.customerId, row);
+});
+$('customer-tbody').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  if (e.target.closest('.col-select')) return;
+  const row = e.target.closest('.customer-row');
+  if (row) { e.preventDefault(); showCustomerDrawer(row.dataset.customerId, row); }
+});
+
+/* Filters, search, page size */
 document.querySelectorAll('#risk-filters .risk-filter').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('#risk-filters .risk-filter').forEach(b => b.classList.remove('active'));
@@ -596,11 +951,21 @@ document.querySelectorAll('#health-risk-filters .risk-filter').forEach(btn => {
   });
 });
 
-$('customer-search').addEventListener('input', e => {
-  state.searchQuery = e.target.value.trim();
+const applySearch = debounce(value => {
+  state.searchQuery = value;
+  state.currentPage = 1;
+  renderCustomerTable();
+}, 160);
+$('customer-search').addEventListener('input', e => applySearch(e.target.value.trim()));
+
+$('page-size').value = String(state.pageSize);
+$('page-size').addEventListener('change', e => {
+  state.pageSize = Number(e.target.value) || 20;
+  safeStorage('churnsight-page-size', String(state.pageSize));
   state.currentPage = 1;
   renderCustomerTable();
 });
+
 $('retrain-btn').addEventListener('click', () => {
   navigateTo('upload');
   showToast('Ready to retrain your model.', 'success');
@@ -627,20 +992,12 @@ document.querySelectorAll('#alert-tabs .alert-tab').forEach(tab => {
     setAlertTab(tab.dataset.tab);
   });
 });
+
 /* ══════════════════  SINGLE PREDICTION  ════════════════════ */
-$('predict-form').addEventListener('submit', async e => {
-  e.preventDefault();
+const PREDICT_BTN_HTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Predict Churn';
 
-  if (!state.modelTrained) {
-    showToast('Please train a model first.', 'error');
-    return;
-  }
-
-  const btn = $('predict-btn');
-  btn.disabled = true;
-  btn.innerHTML = `<span class="spinner-inline"></span> Predicting…`;
-
-  const payload = {
+function readPredictForm() {
+  return {
     age             : +$('p-age').value,
     gender          : $('p-gender').value,
     tenure_months   : +$('p-tenure').value,
@@ -654,64 +1011,110 @@ $('predict-form').addEventListener('submit', async e => {
     contract_type   : $('p-contract').value,
     payment_method  : $('p-payment').value,
   };
+}
 
+async function requestPrediction(payload, { explain = false, signal } = {}) {
+  const headers = await authHeaders({ 'Content-Type': 'application/json' });
+  const res = await fetch(`${API}/predict`, {
+    method: 'POST', headers, signal, body: JSON.stringify({ ...payload, explain }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Prediction failed.');
+  return data;
+}
+
+const whatIf = createWhatIf({
+  score: (payload, { signal }) => requestPrediction(payload, { explain: true, signal }),
+  render: data => renderPrediction(data),
+});
+
+$('predict-form').addEventListener('submit', async e => {
+  e.preventDefault();
+
+  if (!state.modelTrained) {
+    showToast('Please train a model first.', 'error');
+    return;
+  }
+
+  const btn = $('predict-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-inline"></span> Predicting…';
+
+  const payload = readPredictForm();
   try {
-    if (state.user) state.idToken = await state.user.getIdToken(true);
-    const headers = { 'Content-Type': 'application/json' };
-    if (state.idToken) headers['Authorization'] = `Bearer ${state.idToken}`;
-
-    const res  = await fetch(`${API}/predict`, { method: 'POST', headers, body: JSON.stringify(payload) });
-    const data = await res.json();
-
-    if (!res.ok) { showToast(data.error || 'Prediction failed.', 'error'); return; }
-    showPredictionResult(data);
+    const data = await requestPrediction(payload, { explain: true });
+    renderPrediction(data);
+    whatIf.start(payload, data);
   } catch (err) {
-    showToast(`Error: ${err.message}`, 'error');
+    showToast(err.message || 'Prediction failed.', 'error');
   } finally {
     btn.disabled = false;
-    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Predict Churn`;
+    btn.innerHTML = PREDICT_BTN_HTML;
   }
 });
 
-function showPredictionResult(data) {
-  $('result-placeholder').style.display = 'none';
-  $('result-content').style.display     = 'block';
+let lastRecs = '';
+let lastRisk = '';
 
+function renderPrediction(data) {
   const { churn_probability: prob, risk_level: risk, recommendation: recs = [] } = data;
 
-  drawGauge('gaugeCanvas', prob);
-  $('gauge-val').textContent = prob + '%';
+  const content = $('result-content');
+  if (content.style.display === 'none') {
+    $('result-placeholder').style.display = 'none';
+    content.style.display = 'block';
+    replay(content, 'pop-in');
+  }
 
-  const badge = $('risk-badge-large');
-  badge.className = `risk-badge-large ${risk}`;
-  $('risk-label-large').textContent = risk + ' Risk';
+  animateGauge(prob);
 
-  $('recs-list').innerHTML = recs.map(r => `<li>${r}</li>`).join('');
-  animateCounter('gauge-val', 0, prob, 900, v => v.toFixed(1) + '%');
+  if (risk !== lastRisk) {
+    lastRisk = risk;
+    const badge = $('risk-badge-large');
+    badge.className = `risk-badge-large ${risk}`;
+    $('risk-label-large').textContent = risk + ' Risk';
+    replay(badge, 'badge-pop');
+  }
+
+  const key = recs.join('|');
+  if (key !== lastRecs) {
+    lastRecs = key;
+    const list = $('recs-list');
+    list.innerHTML = recs.map(r => `<li>${escapeHtml(r)}</li>`).join('');
+    stagger(list.children, 8);
+  }
 }
 
 /* ══════════════════  HELPERS  ══════════════════════════════ */
 function tooltipStyle() {
+  const t = chartTheme();
   return {
-    backgroundColor: 'rgba(15,19,34,0.95)', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
+    backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder, borderWidth: 1,
+    titleColor: t.tooltipTitle, bodyColor: t.text,
     titleFont: { weight: '700' }, bodyFont: { size: 12 }, padding: 10, cornerRadius: 8,
   };
 }
 
 function gridStyle() {
+  const t = chartTheme();
   return {
-    grid  : { color: 'rgba(255,255,255,0.05)' },
-    ticks : { color: '#64748b', font: { size: 11 } },
+    grid  : { color: t.grid },
+    ticks : { color: t.text, font: { size: 11 } },
     border: { color: 'transparent' },
   };
 }
 
+function setOverlay(el, open) {
+  el.classList.toggle('is-open', open);
+  el.setAttribute('aria-hidden', String(!open));
+}
+
 function showLoading(text = 'Processing…') {
   $('loading-text').textContent = text;
-  $('loading-overlay').style.display = 'flex';
+  setOverlay($('loading-overlay'), true);
 }
 function hideLoading() {
-  $('loading-overlay').style.display = 'none';
+  setOverlay($('loading-overlay'), false);
   $('progress-wrap').style.display   = 'none';
 }
 function showProgress(pct, label) {
@@ -719,30 +1122,43 @@ function showProgress(pct, label) {
   $('progress-fill').style.width    = pct + '%';
   $('progress-label').textContent   = label;
 }
+
+let toastTimer = 0;
 function showToast(msg, type = 'success') {
   const t = $('toast');
   t.textContent = msg;
   t.className   = `toast ${type} show`;
-  setTimeout(() => t.classList.remove('show'), 3500);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
 }
 function updateModelStatus(algo) {
   $('model-status-badge').innerHTML =
-    `<span class="status-dot active"></span><span>${algo} Ready</span>`;
+    `<span class="status-dot active"></span><span>${escapeHtml(algo)} Ready</span>`;
 }
 
+const customerIndex = new Map();
 function getCustomerById(id) {
-  return state.allCustomers.find(c => c.id === id);
+  if (customerIndex.size !== state.allCustomers.length) {
+    customerIndex.clear();
+    state.allCustomers.forEach(c => customerIndex.set(c.id, c));
+  }
+  return customerIndex.get(id);
 }
 
-function showCustomerDrawer(id) {
+let drawerReturnFocus = null;
+
+function showCustomerDrawer(id, trigger) {
   const customer = getCustomerById(id);
   if (!customer) return;
+  const drawer = $('customer-drawer');
   $('drawer-customer-id').textContent = customer.id;
   $('drawer-risk-tag').textContent = customer.risk_level;
   $('drawer-risk-tag').className = `risk-tag ${customer.risk_level}`;
-  $('drawer-churn-prob').textContent = `${customer.churn_prob}%`;
+  animateNumber($('drawer-churn-prob'), Number(customer.churn_prob) || 0, { duration: 700, format: v => `${v.toFixed(1)}%` });
+  $('drawer-prob-fill').style.setProperty('--w', `${Math.min(100, Number(customer.churn_prob) || 0)}%`);
+  $('drawer-prob-fill').className = `drawer-prob-fill ${customer.risk_level}`;
   $('drawer-tenure').textContent = `${customer.tenure} mo`;
-  $('drawer-monthly').textContent = `$${customer.monthly.toFixed(2)}`;
+  $('drawer-monthly').textContent = `$${(Number(customer.monthly) || 0).toFixed(2)}`;
   $('drawer-support').textContent = customer.support;
   $('drawer-last-login').textContent = `${customer.last_login} days`;
   $('drawer-contract').textContent = customer.contract_type || 'N/A';
@@ -750,11 +1166,39 @@ function showCustomerDrawer(id) {
   $('drawer-action').textContent = customer.risk_level === 'High'
     ? 'Prioritize outreach and service recovery for this customer.'
     : 'Continue normal customer success playbook.';
-  $('customer-drawer').style.display = 'flex';
+  stagger(drawer.querySelectorAll('.drawer-row'), 10);
+  drawer.dataset.customerId = customer.id;
+
+  drawerReturnFocus = trigger || document.activeElement;
+  setOverlay(drawer, true);
+  $('drawer-close').focus({ preventScroll: true });
 }
 
 function closeCustomerDrawer() {
-  $('customer-drawer').style.display = 'none';
+  const drawer = $('customer-drawer');
+  if (!drawer.classList.contains('is-open')) return;
+  setOverlay(drawer, false);
+  if (drawerReturnFocus && document.contains(drawerReturnFocus)) drawerReturnFocus.focus({ preventScroll: true });
+  drawerReturnFocus = null;
+}
+
+/** Load a customer's known attributes into the predict form and score them. */
+function simulateCustomer(id) {
+  const c = getCustomerById(id);
+  if (!c) return;
+  const set = (field, value) => { if (value !== undefined && value !== null && value !== '') $(field).value = value; };
+  set('p-tenure', c.tenure);
+  set('p-monthly', c.monthly);
+  set('p-total', +((Number(c.tenure) || 0) * (Number(c.monthly) || 0)).toFixed(2));
+  set('p-tickets', c.support);
+  set('p-lastlogin', c.last_login);
+  set('p-location', c.location);
+  set('p-contract', c.contract_type);
+  set('p-payment', c.payment_method);
+  closeCustomerDrawer();
+  navigateTo('predict');
+  $('predict-form').requestSubmit();
+  showToast(`Loaded ${c.id}. Age, products and logins use form defaults.`, 'success');
 }
 
 function calculateHealthScore(customer) {
@@ -775,9 +1219,11 @@ function calculateHealthScore(customer) {
 }
 
 function renderHealthScores() {
-  const list = state.allCustomers.map(c => ({ ...c, ...calculateHealthScore(c) }));
+  // Scores depend only on the customer row, so compute them once per dataset.
+  state.allCustomers.forEach(c => { c._health ??= calculateHealthScore(c); });
+  const list = state.allCustomers.map(c => ({ ...c, ...c._health }));
   const filtered = state.healthFilter === 'All' ? list : list.filter(c => c.risk_level === state.healthFilter);
-  const top = filtered.sort((a,b) => b.score - a.score).slice(0, 9);
+  const top = [...filtered].sort((a,b) => b.score - a.score).slice(0, 9);
   const average = filtered.length ? Math.round(filtered.reduce((sum,x) => sum + x.score, 0)/filtered.length) : 0;
   const critical = filtered.filter(c => c.score < 40).length;
   const improving = filtered.filter(c => c.score >= 70 && c.risk_level !== 'High').length;
@@ -792,27 +1238,30 @@ function renderHealthScores() {
     return;
   }
 
-  container.innerHTML = top.map(customer => {
+  container.innerHTML = top.map((customer, idx) => {
     const tier = customer.score >= 75 ? 'Low' : customer.score >= 45 ? 'Medium' : 'High';
     const worst = [...customer.components].sort((a,b) => a.value - b.value).slice(0, 2);
     return `
-      <div class="health-card">
+      <div class="health-card card-in" style="--i:${idx}">
         <div class="health-card-header">
-          <h4>${customer.id}</h4>
+          <h4>${escapeHtml(customer.id)}</h4>
           <span class="health-tier ${tier}">${tier} Risk</span>
         </div>
         <div class="health-score">${customer.score}</div>
         <div class="health-note">${customer.score < 45 ? 'Urgent action required to retain this account.' : 'Monitor key signals and engage proactively.'}</div>
         ${customer.components.map(comp => `
           <div class="health-component">
-            <span>${comp.name}</span>
+            <span>${escapeHtml(comp.name)}</span>
             <span>${comp.value}%</span>
           </div>
           <div class="health-bar"><div class="health-bar-fill" style="width:${comp.value}%"></div></div>
         `).join('')}
-        <div class="health-note"><strong>Drag factor:</strong> ${worst.map(c => c.name).join(' & ')}</div>
+        <div class="health-note"><strong>Drag factor:</strong> ${escapeHtml(worst.map(c => c.name).join(' & '))}</div>
       </div>`;
   }).join('');
+  container.querySelectorAll('.health-score').forEach((el, i) => {
+    animateNumber(el, top[i].score, { duration: 800 });
+  });
 }
 
 function buildCohortData() {
@@ -833,9 +1282,15 @@ function buildCohortData() {
     labels: cohorts.map(([label]) => label),
     months,
     heatmap: cohorts.map(([, customers]) => {
-      const avgChurn = customers.length ? customers.reduce((sum, c) => sum + c.churn_prob, 0) / customers.length : 0;
-      const base = customers.length ? 90 - avgChurn * 0.3 : 75;
-      return months.map((_, index) => Math.max(18, Math.min(100, Math.round(base - index * 10 + Math.random() * 6))));
+      const avgChurn = customers.length
+        ? customers.reduce((sum, c) => sum + Number(c.churn_prob || 0), 0) / customers.length
+        : 0;
+      const avgTenure = customers.length
+        ? customers.reduce((sum, c) => sum + Number(c.tenure || 0), 0) / customers.length
+        : 0;
+      // Deterministic pseudo-retention curve from churn risk + tenure (demo proxy, not calendar retention).
+      const base = Math.max(25, Math.min(95, 92 - avgChurn * 0.45 + Math.min(avgTenure, 36) * 0.15));
+      return months.map((_, index) => Math.max(15, Math.min(100, Math.round(base - index * (6 + avgChurn * 0.04)))));
     }),
     contractCounts: cohorts.reduce((acc, [label, customers]) => {
       acc[label] = customers.length;
@@ -854,27 +1309,33 @@ function renderCohortView() {
     return;
   }
   const { labels, months, heatmap } = state.cohorts;
-  container.innerHTML = '';
+  const cells = [];
   labels.forEach((label, rowIndex) => {
     months.forEach((month, monthIndex) => {
       const value = heatmap[rowIndex][monthIndex];
-      const bg = value >= 85 ? 'rgba(16,185,129,0.32)' : value >= 70 ? 'rgba(16,185,129,0.2)' : value >= 55 ? 'rgba(245,158,11,0.18)' : value >= 40 ? 'rgba(239,68,68,0.16)' : 'rgba(239,68,68,0.28)';
-      const color = value >= 70 ? '#047857' : value >= 55 ? '#92400E' : '#7F1D1D';
-      container.innerHTML += `<div class="heatmap-cell" style="background:${bg}; color:${color};">${label} ${month}<br/><strong>${value}%</strong></div>`;
+      const level = value >= 85 ? 5 : value >= 70 ? 4 : value >= 55 ? 3 : value >= 40 ? 2 : 1;
+      // Diagonal wave so the grid ripples in from the top-left.
+      const wave = Math.min(rowIndex + monthIndex, 14);
+      cells.push(`<div class="heatmap-cell heat-${level} cell-in" style="--i:${wave}">${escapeHtml(label)} ${escapeHtml(month)}<br/><strong>${value}%</strong></div>`);
     });
   });
+  container.innerHTML = cells.join('');
 
   const labelType = state.cohortType === 'contract' ? 'Contract Type' : state.cohortType === 'location' ? 'Location' : 'Signup Cohort';
-  $('cohort-summary').textContent = `Displaying ${state.cohorts.totalCohorts} ${labelType} cohorts across ${state.cohorts.months.length} periods.`;
+  $('cohort-summary').textContent = `Displaying ${state.cohorts.totalCohorts} ${labelType} cohorts (proxy retention from risk/tenure — not a true calendar cohort).`;
 
-  buildCohortTrendChart();
-  buildContractChart();
+  // Cohort charts depend on the selected cohort type: rebuild them when next needed.
+  destroyChart('cohortTrend');
+  destroyChart('contract');
+  state.chartsDirty.add('cohorts');
+  if (currentSection === 'cohorts') renderSectionCharts('cohorts');
 }
 
 function buildCohortTrendChart() {
   destroyChart('cohortTrend');
   const ctx = $('cohortTrendChart').getContext('2d');
-  const data = state.cohorts.labels.map((label, index) => ({ label, value: state.cohorts.heatmap[index][2] }));
+  const t = chartTheme();
+  const light = t.dark ? 58 : 34;
   state.charts.cohortTrend = new Chart(ctx, {
     type: 'line',
     data: {
@@ -882,15 +1343,17 @@ function buildCohortTrendChart() {
       datasets: state.cohorts.labels.map((label, index) => ({
         label,
         data: state.cohorts.heatmap[index],
-        borderColor: `hsl(${index * 40}, 78%, 63%)`, fill: false, tension: 0.3, pointRadius: 3, borderWidth: 2.5,
+        borderColor: `hsl(${168 + index * 18}, 38%, ${light + index * 4}%)`, fill: false, tension: 0.3, pointRadius: 3, borderWidth: 2.5,
       })),
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { position: 'top', labels: { color: '#94a3b8' } }, tooltip: tooltipStyle() },
+      animation: chartAnimation(1000),
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top', labels: { color: t.text } }, tooltip: tooltipStyle() },
       scales: {
-        x: { ...gridStyle(), title: { display: true, text: 'Month', color: '#64748b' } },
-        y: { ...gridStyle(), min: 0, max: 100, title: { display: true, text: 'Retention %', color: '#64748b' } },
+        x: { ...gridStyle(), title: axisTitle('Month') },
+        y: { ...gridStyle(), min: 0, max: 100, title: axisTitle('Retention %') },
       },
     },
   });
@@ -901,18 +1364,20 @@ function buildContractChart() {
   const ctx = $('contractChart').getContext('2d');
   const labels = Object.keys(state.cohorts.contractCounts);
   const values = Object.values(state.cohorts.contractCounts);
+  const light = chartTheme().dark ? 56 : 38;
   state.charts.contract = new Chart(ctx, {
     type: 'bar',
     data: {
       labels,
       datasets: [{
         label: 'Customers', data: values,
-        backgroundColor: labels.map((_, index) => `hsla(${index * 45}, 85%, 60%, 0.82)`),
+        backgroundColor: labels.map((_, index) => `hsla(${168 + index * 16}, 40%, ${light}%, 0.85)`),
         borderRadius: 6, borderSkipped: false,
       }],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      animation: chartAnimation(900),
       plugins: { legend: { display: false }, tooltip: tooltipStyle() },
       scales: {
         x: { ...gridStyle() },
@@ -928,28 +1393,52 @@ function initAlerts() {
 }
 
 function generateAlerts() {
-  const highRisk = state.allCustomers.filter(c => c.risk_level === 'High').slice(0, 4);
-  const mediumRisk = state.allCustomers.filter(c => c.risk_level === 'Medium').slice(0, 2);
-  const open = highRisk.map((customer, idx) => ({
-    id: `alert-open-${idx}`,
-    customer: customer.id,
-    severity: customer.risk_level,
-    title: 'Churn probability rising',
-    signals: ['Low activity', 'Support spike', 'Payment warning'],
-    time: `${2 + idx}h ago`,
-    status: 'Open',
-    details: `Customer ${customer.id} has a churn probability of ${customer.churn_prob}%.`,
-  }));
-  const acknowledged = mediumRisk.map((customer, idx) => ({
-    id: `alert-ack-${idx}`,
-    customer: customer.id,
-    severity: customer.risk_level,
-    title: 'Engagement declined',
-    signals: ['Login drop', 'Feature usage low'],
-    time: `${10 + idx}h ago`,
-    status: 'Acknowledged',
-    details: `Assigned CSM follow-up for ${customer.id}.`,
-  }));
+  const rules = state.admin.settings?.alert_rules || [
+    { id: 'reengagement', enabled: true, last_login_days: 21 },
+    { id: 'support_escalation', enabled: true, support_tickets: 4 },
+  ];
+  const byId = Object.fromEntries(rules.map(r => [r.id, r]));
+  const loginThreshold = Number(byId.reengagement?.last_login_days ?? 21);
+  const supportThreshold = Number(byId.support_escalation?.support_tickets ?? 4);
+
+  const open = [];
+  state.allCustomers.forEach((customer, idx) => {
+    const signals = [];
+    if (byId.reengagement?.enabled !== false && Number(customer.last_login) > loginThreshold) {
+      signals.push(`Inactive ${customer.last_login}d`);
+    }
+    if (byId.support_escalation?.enabled !== false && Number(customer.support) > supportThreshold) {
+      signals.push(`Support tickets ${customer.support}`);
+    }
+    if (customer.risk_level === 'High') signals.push(`Risk ${customer.churn_prob}%`);
+    if (!signals.length) return;
+    if (open.length >= 6) return;
+    open.push({
+      id: `alert-open-${idx}`,
+      customer: customer.id,
+      severity: customer.risk_level,
+      title: customer.risk_level === 'High' ? 'High churn risk detected' : 'Retention signal triggered',
+      signals,
+      time: `${2 + (idx % 8)}h ago`,
+      status: 'Open',
+      details: `Customer ${customer.id}: ${signals.join(' · ')}.`,
+    });
+  });
+
+  const acknowledged = state.allCustomers
+    .filter(c => c.risk_level === 'Medium')
+    .slice(0, 2)
+    .map((customer, idx) => ({
+      id: `alert-ack-${idx}`,
+      customer: customer.id,
+      severity: customer.risk_level,
+      title: 'Engagement declined',
+      signals: ['CSM follow-up scheduled'],
+      time: `${10 + idx}h ago`,
+      status: 'Acknowledged',
+      details: `Assigned CSM follow-up for ${customer.id}.`,
+    }));
+
   const resolved = [{
     id: 'alert-res-0',
     customer: state.allCustomers[0]?.id || 'C001',
@@ -1004,25 +1493,71 @@ function renderAlerts() {
     return;
   }
   const items = state.alerts[state.alertTab] || [];
-  list.innerHTML = items.length ? items.map(alert => `
-    <div class="alert-card">
+  list.innerHTML = items.length ? items.map((alert, idx) => `
+    <div class="alert-card card-in" style="--i:${Math.min(idx, 10)}" data-alert-id="${escapeHtml(alert.id)}">
       <div class="alert-meta">
         <div>
-          <div class="alert-title">${alert.title}</div>
-          <div class="alert-sub">Customer ${alert.customer} · ${alert.time}</div>
+          <div class="alert-title">${escapeHtml(alert.title)}</div>
+          <div class="alert-sub">Customer ${escapeHtml(alert.customer)} · ${escapeHtml(alert.time)}</div>
         </div>
-        <span class="alert-badge ${alert.severity}">${alert.severity}</span>
+        <span class="alert-badge ${escapeHtml(alert.severity)}">${escapeHtml(alert.severity)}</span>
       </div>
-      <p>${alert.details}</p>
-      <div class="alert-badges">${alert.signals.map(signal => `<span class="alert-badge ${alert.severity}">${signal}</span>`).join('')}</div>
-      <div class="alert-actions"><button class="btn-secondary">Acknowledge</button><button class="btn-secondary">Assign CSM</button></div>
+      <p>${escapeHtml(alert.details)}</p>
+      <div class="alert-badges">${alert.signals.map(signal => `<span class="alert-badge ${escapeHtml(alert.severity)}">${escapeHtml(signal)}</span>`).join('')}
+        ${alert.assignee ? `<span class="alert-badge assignee">Assigned: ${escapeHtml(alert.assignee)}</span>` : ''}</div>
+      <div class="alert-actions">
+        ${alert.status === 'Open' ? '<button class="btn-secondary" data-action="acknowledge" type="button">Acknowledge</button>' : ''}
+        ${alert.status === 'Acknowledged' ? '<button class="btn-secondary" data-action="resolve" type="button">Mark resolved</button>' : ''}
+        ${alert.status !== 'Resolved' && !alert.assignee ? '<button class="btn-secondary" data-action="assign" type="button">Assign to me</button>' : ''}
+      </div>
     </div>
   `).join('') : '<div class="empty-card">No alerts in this folder yet.</div>';
   playbooks.innerHTML = '<div class="empty-card">Select the Playbooks tab to review automation templates.</div>';
 }
 
+/* Alert workflow: Open -> Acknowledged -> Resolved, with the card animating out of its list. */
+const ALERT_NEXT = { acknowledge: 'Acknowledged', resolve: 'Resolved' };
+
+$('alerts-list').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const card = btn.closest('.alert-card');
+  const alert = (state.alerts[state.alertTab] || []).find(a => a.id === card.dataset.alertId);
+  if (!alert) return;
+
+  if (btn.dataset.action === 'assign') {
+    alert.assignee = state.user?.displayName || state.user?.email || 'You';
+    renderAlerts();
+    showToast(`Assigned ${alert.customer} to ${alert.assignee}.`, 'success');
+    return;
+  }
+
+  const target = ALERT_NEXT[btn.dataset.action];
+  if (!target) return;
+  const move = () => {
+    state.alerts[state.alertTab] = state.alerts[state.alertTab].filter(a => a !== alert);
+    alert.status = target;
+    state.alerts[target].unshift(alert);
+    setAlertTab(state.alertTab);
+    populateInsights(state.results);
+    showToast(`Alert for ${alert.customer} moved to ${target}.`, 'success');
+  };
+  if (prefersReducedMotion()) { move(); return; }
+  card.classList.add('card-out');
+  card.addEventListener('animationend', move, { once: true });
+});
+
 function addEventListeners() {
   $('drawer-close').addEventListener('click', closeCustomerDrawer);
+  $('drawer-sim-btn').addEventListener('click', () => simulateCustomer($('customer-drawer').dataset.customerId));
+  $('customer-drawer').addEventListener('keydown', e => {
+    if (e.key === 'Escape') { closeCustomerDrawer(); return; }
+    if (e.key !== 'Tab') return;
+    const focusable = [...$('customer-drawer').querySelectorAll('button:not([disabled])')];
+    const first = focusable[0], last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  });
   $('customer-drawer').addEventListener('click', e => {
     if (e.target.id === 'customer-drawer') closeCustomerDrawer();
   });
@@ -1041,34 +1576,14 @@ function formatBytes(bytes) {
 }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function animateValue(id, from, to, duration) {
-  const el = $(id), start = performance.now(), range = to - from;
-  function step(now) {
-    const t = Math.min((now - start) / duration, 1);
-    const e = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-    el.textContent = Math.round(from + range * e);
-    if (t < 1) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
-
-function animateCounter(id, from, to, duration, fmt = v => Math.round(v)) {
-  const el = $(id), start = performance.now(), range = to - from;
-  function step(now) {
-    const t = Math.min((now - start) / duration, 1);
-    const e = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-    el.textContent = fmt(from + range * e);
-    if (t < 1) requestAnimationFrame(step);
-  }
-  requestAnimationFrame(step);
-}
-
 /* ══════════════════  FIREBASE AUTH FLOW  ════════════════════ */
 let activeAuthTab = 'login';
 
 async function loadPersistedResults() {
+  if (!state.modelTrained) showTableSkeleton();
   try {
-    const res = await fetch(`${API}/results`);
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/results`, { headers });
     if (!res.ok) return;
     const data = await res.json();
     if (data && data.summary) {
@@ -1081,12 +1596,36 @@ async function loadPersistedResults() {
     }
   } catch (err) {
     console.warn('Unable to load persisted model state:', err);
+  } finally {
+    if (!state.modelTrained) renderCustomerTable({ animate: false }); // drops the skeleton rows
   }
 }
 
-function initAuthUI() {
-  // Show overlay while checking auth state
-  $('auth-overlay').style.display = 'flex';
+function showAuthOverlay() {
+  const overlay = $('auth-overlay');
+  overlay.style.display = 'flex';
+  overlay.style.opacity = '1';
+  overlay.setAttribute('aria-hidden', 'false');
+  // Restart entrance animations
+  overlay.classList.remove('is-visible');
+  void overlay.offsetWidth;
+  requestAnimationFrame(() => overlay.classList.add('is-visible'));
+}
+
+function hideAuthOverlay() {
+  const overlay = $('auth-overlay');
+  overlay.classList.remove('is-visible');
+  overlay.classList.add('is-leaving');
+  overlay.style.opacity = '0';
+  overlay.setAttribute('aria-hidden', 'true');
+  setTimeout(() => {
+    overlay.style.display = 'none';
+    overlay.classList.remove('is-leaving');
+  }, 420);
+}
+
+async function initAuthUI() {
+  showAuthOverlay();
 
   $('tab-login').addEventListener('click',    () => setAuthTab('login'));
   $('tab-register').addEventListener('click', () => setAuthTab('register'));
@@ -1094,7 +1633,15 @@ function initAuthUI() {
   $('google-login-btn').addEventListener('click', handleGoogleAuth);
   $('logout-btn').addEventListener('click',   handleSignOut);
 
-  onAuthStateChanged(auth, async firebaseUser => {
+  // The auth card is already interactive; the SDK streams in behind it.
+  try {
+    fb = await loadFirebase();
+  } catch (err) {
+    showToast('Could not load sign-in. Check your connection and reload.', 'error');
+    return;
+  }
+
+  fb.onAuthStateChanged(fb.auth, async firebaseUser => {
     if (firebaseUser) {
       state.user    = firebaseUser;
       state.idToken = await firebaseUser.getIdToken();
@@ -1108,8 +1655,7 @@ function initAuthUI() {
       $('user-display-email').textContent = firebaseUser.email;
       $('user-profile-section').style.display = 'flex';
 
-      $('auth-overlay').style.opacity = '0';
-      setTimeout(() => { $('auth-overlay').style.display = 'none'; }, 500);
+      hideAuthOverlay();
 
       showToast(`Welcome back, ${firebaseUser.displayName || firebaseUser.email}!`, 'success');
       await refreshAdminAccess();
@@ -1124,8 +1670,7 @@ function initAuthUI() {
       state.admin.modelStatus = null;
       $('user-profile-section').style.display = 'none';
       updateAdminNavigation();
-      $('auth-overlay').style.display   = 'flex';
-      $('auth-overlay').style.opacity   = '1';
+      showAuthOverlay();
       await loadPersistedResults();
     }
   });
@@ -1136,16 +1681,19 @@ function setAuthTab(tab) {
   $('tab-login').classList.toggle('active',    tab === 'login');
   $('tab-register').classList.toggle('active', tab === 'register');
   if (tab === 'login') {
-    $('auth-subtitle').textContent    = 'Sign in to access your Churn Prediction Dashboard';
+    $('auth-subtitle').textContent    = 'Sign in to access your churn prediction workspace';
     $('submit-btn-text').textContent  = 'Sign In';
+    qs('.auth-title').textContent     = 'Welcome back';
   } else {
-    $('auth-subtitle').textContent    = 'Create a secure account to deploy and use ChurnSight';
+    $('auth-subtitle').textContent    = 'Create an account to train models and run retention playbooks';
     $('submit-btn-text').textContent  = 'Create Account';
+    qs('.auth-title').textContent     = 'Join ChurnSight';
   }
 }
 
 async function handleEmailAuth(e) {
   e.preventDefault();
+  if (!fb) { showToast('Sign-in is still loading. Try again in a moment.', 'error'); return; }
   const email    = $('auth-email').value.trim();
   const password = $('auth-password').value;
   const btn      = $('auth-submit-btn');
@@ -1157,9 +1705,9 @@ async function handleEmailAuth(e) {
 
   try {
     if (activeAuthTab === 'login') {
-      await signInWithEmailAndPassword(auth, email, password);
+      await fb.signInWithEmailAndPassword(fb.auth, email, password);
     } else {
-      await createUserWithEmailAndPassword(auth, email, password);
+      await fb.createUserWithEmailAndPassword(fb.auth, email, password);
     }
   } catch (err) {
     showToast(err.message, 'error');
@@ -1169,9 +1717,10 @@ async function handleEmailAuth(e) {
 }
 
 async function handleGoogleAuth() {
-  const provider = new GoogleAuthProvider();
+  if (!fb) { showToast('Sign-in is still loading. Try again in a moment.', 'error'); return; }
+  const provider = new fb.GoogleAuthProvider();
   try {
-    await signInWithPopup(auth, provider);
+    await fb.signInWithPopup(fb.auth, provider);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -1185,11 +1734,8 @@ async function refreshAdminAccess() {
   }
 
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/whoami`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/admin/whoami`, { method: 'GET', headers });
     const body = await res.json();
     state.admin.isAdmin = body.is_admin === true;
     if (state.admin.isAdmin && $('section-admin').classList.contains('active')) {
@@ -1215,19 +1761,17 @@ async function loadAdminUsers() {
   const list = $('admin-user-list');
   list.innerHTML = '<tr><td class="empty-row" colspan="5">Loading users…</td></tr>';
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/users`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/admin/users`, { headers });
     const body = await res.json();
     if (!res.ok) {
-      list.innerHTML = `<tr><td class="empty-row" colspan="5">${body.error || 'Unable to fetch users'}</td></tr>`;
+      list.innerHTML = `<tr><td class="empty-row" colspan="5">${escapeHtml(body.error || 'Unable to fetch users')}</td></tr>`;
       return;
     }
     state.admin.users = body.users || [];
     renderAdminUsers();
   } catch (err) {
-    list.innerHTML = `<tr><td class="empty-row" colspan="5">${err.message}</td></tr>`;
+    list.innerHTML = `<tr><td class="empty-row" colspan="5">${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -1244,19 +1788,20 @@ function renderAdminUsers() {
   }
 
   list.innerHTML = users.map(user => {
-    const providers = user.provider_ids.length ? user.provider_ids.join(', ') : 'Email';
+    const providers = user.provider_ids?.length ? user.provider_ids.join(', ') : 'Email';
     const status = user.disabled ? 'Disabled' : 'Active';
     const actionButton = user.disabled ? 'Enable' : 'Disable';
     const action = user.disabled ? 'enable' : 'disable';
+    const uid = escapeHtml(user.uid);
     return `
       <tr>
-        <td>${user.display_name || '—'}</td>
-        <td>${user.email || '—'}</td>
-        <td>${providers}</td>
+        <td>${escapeHtml(user.display_name || '—')}</td>
+        <td>${escapeHtml(user.email || '—')}</td>
+        <td>${escapeHtml(providers)}</td>
         <td>${status}</td>
         <td class="table-actions">
-          <button class="btn-secondary btn-small" data-action="${action}" data-uid="${user.uid}">${actionButton}</button>
-          <button class="btn-danger btn-small" data-action="delete" data-uid="${user.uid}">Delete</button>
+          <button class="btn-secondary btn-small" data-action="${action}" data-uid="${uid}">${actionButton}</button>
+          <button class="btn-danger btn-small" data-action="delete" data-uid="${uid}">Delete</button>
         </td>
       </tr>`;
   }).join('');
@@ -1264,13 +1809,10 @@ function renderAdminUsers() {
 
 async function modifyAdminUser(uid, action) {
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await authHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/users/${uid}`, {
       method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ action })
     });
     const body = await res.json();
@@ -1287,10 +1829,8 @@ async function modifyAdminUser(uid, action) {
 
 async function loadAdminSettings() {
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/settings`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/admin/settings`, { headers });
     const body = await res.json();
     if (!res.ok) {
       showToast(body.error || 'Unable to load settings.', 'error');
@@ -1319,13 +1859,10 @@ async function saveAdminSettings() {
   };
 
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await authHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/settings`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify(payload)
     });
     const body = await res.json();
@@ -1334,7 +1871,9 @@ async function saveAdminSettings() {
       return;
     }
     state.admin.settings = body;
-    showToast('Admin settings saved.', 'success');
+    await loadPersistedResults();
+    if (state.modelTrained) initAlerts();
+    showToast('Admin settings saved and risk tiers recalculated.', 'success');
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -1342,10 +1881,8 @@ async function saveAdminSettings() {
 
 async function loadAdminModelStatus() {
   try {
-    const token = await state.user.getIdToken(true);
-    const res = await fetch(`${API}/admin/model`, {
-      headers: { Authorization: `Bearer ${token}` }
-    });
+    const headers = await authHeaders();
+    const res = await fetch(`${API}/admin/model`, { headers });
     const body = await res.json();
     if (!res.ok) {
       showToast(body.error || 'Unable to load model status.', 'error');
@@ -1362,13 +1899,10 @@ async function loadAdminModelStatus() {
 
 async function adminModelAction(action) {
   try {
-    const token = await state.user.getIdToken(true);
+    const headers = await authHeaders({ 'Content-Type': 'application/json' });
     const res = await fetch(`${API}/admin/model/actions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
+      headers,
       body: JSON.stringify({ action })
     });
     const body = await res.json();
@@ -1377,6 +1911,12 @@ async function adminModelAction(action) {
       return;
     }
     showToast(`Model action ${action} completed.`, 'success');
+    if (action === 'reload_sample') await loadPersistedResults();
+    if (action === 'reset') {
+      state.modelTrained = false;
+      state.results = null;
+      state.allCustomers = [];
+    }
     await loadAdminModelStatus();
   } catch (err) {
     showToast(err.message, 'error');
@@ -1385,7 +1925,7 @@ async function adminModelAction(action) {
 
 async function handleSignOut() {
   try {
-    await signOut(auth);
+    await fb.signOut(fb.auth);
     showToast('Signed out successfully.', 'success');
     location.reload();
   } catch (err) {
@@ -1411,5 +1951,54 @@ $('admin-user-table')?.addEventListener('click', e => {
 
 /* ══════════════════  INIT  ════════════════════════════════ */
 $('download-sample').href = `${location.origin}/sample_data.csv`;
+$('export-overview-btn')?.addEventListener('click', () => exportCustomersCsv(state.allCustomers));
+$('export-customers-btn')?.addEventListener('click', () => exportCustomersCsv(state.filteredCustomers, 'filtered '));
+
+initTheme();
+initPalette({
+  navigate: requestNavigate,
+  focusSearch() {
+    if (!state.modelTrained) { showToast('Train a model to search customers.', 'error'); return; }
+    navigateTo('customers');
+    setTimeout(() => $('customer-search').focus(), prefersReducedMotion() ? 0 : 220);
+  },
+  toggleTheme: () => toggleTheme(),
+  findCustomers(query) {
+    const q = query.toLowerCase();
+    return state.allCustomers.filter(c => c._q?.includes(q));
+  },
+  openCustomer(id) {
+    navigateTo('customers');
+    showCustomerDrawer(id);
+  },
+  getCommands() {
+    const nav = Object.entries(titles)
+      .filter(([key]) => key !== 'admin' || state.admin.isAdmin)
+      .map(([key, label]) => ({
+        id: `go:${key}`, label: `Go to ${label}`, group: 'Pages', keywords: key,
+        run: () => requestNavigate(key),
+      }));
+    return [
+      ...nav,
+      { id: 'theme', label: 'Toggle dark theme', group: 'Actions', hint: 'D', keywords: 'light dark mode appearance', run: () => toggleTheme() },
+      { id: 'export', label: 'Export risk list as CSV', group: 'Actions', keywords: 'download', run: () => exportCustomersCsv(state.allCustomers) },
+      { id: 'retrain', label: 'Retrain model', group: 'Actions', keywords: 'upload train', run: () => navigateTo('upload') },
+      { id: 'high', label: 'Show high-risk customers', group: 'Actions', keywords: 'filter churn', run: () => {
+        if (!state.modelTrained) { showToast('Please upload data and train a model first.', 'error'); return; }
+        state.riskFilter = 'High';
+        state.currentPage = 1;
+        document.querySelectorAll('#risk-filters .risk-filter').forEach(b => b.classList.toggle('active', b.dataset.risk === 'High'));
+        renderCustomerTable();
+        navigateTo('customers');
+      } },
+      ...(state.user ? [{ id: 'signout', label: 'Sign out', group: 'Actions', run: handleSignOut }] : []),
+    ];
+  },
+});
+
+// Fonts and late layout shifts move the nav items; keep the indicator aligned.
+document.fonts?.ready.then(moveNavIndicator);
+window.addEventListener('load', moveNavIndicator);
+
 initAuthUI();
 navigateTo('upload');

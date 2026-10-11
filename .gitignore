@@ -5,5 +5,12 @@ __pycache__/
 !api/churn_model.pkl
 node_modules/
 dist/
+.data/
+.env
+.env.local
 .vercel/
 .vercel
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
