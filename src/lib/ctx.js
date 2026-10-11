@@ -41,7 +41,8 @@ export function timeAgo(ts) {
   return `${s}s ago`;
 }
 
-export const humanize = name => String(name).replace(/_age_days$/, ' (days)').replace(/_/g, ' ');
+// "MonthlyCharges" and "monthly_charges" both read as "monthly charges".
+export const humanize = name => String(name).replace(/_age_days$/, ' (days)').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase();
 
 /* ── Overlays, toasts ───────────────────────────────────────── */
 export function setOverlay(el, open) {

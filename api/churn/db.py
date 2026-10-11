@@ -57,7 +57,8 @@ customers_t = sa.Table(
     sa.Column('attrs', sa.Text),
 )
 sa.Index('ix_customers_ws_prob', customers_t.c.workspace_id, customers_t.c.prob)
-sa.Index('ix_customers_ws_tier', customers_t.c.workspace_id, customers_t.c.tier)
+sa.Index('ix_customers_ws_tier_prob', customers_t.c.workspace_id, customers_t.c.tier, customers_t.c.prob)
+sa.Index('ix_customers_ws_loss', customers_t.c.workspace_id, customers_t.c.expected_loss)
 
 alerts_t = sa.Table(
     'alerts', metadata,
@@ -147,6 +148,8 @@ def get_engine() -> Engine:
         if _engine is None:
             url = config.database_url()
             kwargs: dict[str, Any] = {'future': True, 'pool_pre_ping': True}
+            if not url.startswith('sqlite'):
+                kwargs.update(pool_size=config.DB_POOL_SIZE, max_overflow=config.DB_POOL_SIZE, pool_recycle=1800)
             if url.startswith('sqlite'):
                 kwargs['connect_args'] = {'check_same_thread': False, 'timeout': 30}
             _engine = sa.create_engine(url, **kwargs)

@@ -90,23 +90,27 @@ export function createWhatIf({ score, render }) {
     delta.textContent = `${diff > 0 ? '▲' : '▼'} ${Math.abs(diff)} pts vs original`;
   }
 
-  const rescore = debounce(async () => {
+  // While dragging only the probability is re-scored (cheap); the full explanation follows when the slider is released.
+  const run = async explain => {
     controller?.abort();
     controller = new AbortController();
     try {
-      const result = await score(current, { signal: controller.signal });
+      const result = await score(current, { signal: controller.signal, explain });
       render(result);
-      renderImpacts('impact-list', result.impacts);
+      if (explain) renderImpacts('impact-list', result.impacts);
       showDelta(result);
     } catch (err) {
       if (err.name !== 'AbortError') console.warn('What-if scoring failed:', err);
     }
-  }, 220);
+  };
+  const rescore = debounce(() => run(false), 150);
+  const explainSoon = debounce(() => run(true), 350);
 
   function change(key, value) {
     current = { ...current, [key]: value };
     syncControls();
     rescore();
+    explainSoon();
   }
 
   $('whatif-levers').addEventListener('input', e => {
@@ -120,6 +124,7 @@ export function createWhatIf({ score, render }) {
   $('whatif-reset').addEventListener('click', () => {
     if (!base) return;
     rescore.cancel();
+    explainSoon.cancel();
     controller?.abort();
     current = { ...base.values };
     syncControls();
@@ -137,6 +142,7 @@ export function createWhatIf({ score, render }) {
       base = { values: { ...values }, result };
       current = { ...values };
       rescore.cancel();
+      explainSoon.cancel();
       controller?.abort();
       syncControls();
       renderImpacts('impact-list', result.impacts);

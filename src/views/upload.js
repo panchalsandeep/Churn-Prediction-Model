@@ -35,7 +35,7 @@ function renderSchema(res) {
   box.innerHTML = `
     <div class="schema-title">Detected schema <span class="ok-dot"></span></div>
     <div class="schema-grid">
-      ${row('Churn column', escapeHtml(s.target), `${(s.positive_rate * 100).toFixed(1)}% churned · ${fmtInt(s.rows)} rows`)}
+      ${row('Churn column', escapeHtml(s.target), `${(s.positive_rate * 100).toFixed(1)}% churned · ${res.estimated ? '≈' : ''}${fmtInt(s.rows)} rows`)}
       ${row('Customer ID', s.id ? escapeHtml(s.id) : 'none', s.id ? '' : 'rows will be numbered')}
       ${row('Holdout', s.time_col ? 'Time-based' : 'Stratified random', s.time_col ? `latest 20% of ${escapeHtml(s.time_col)}` : 'no snapshot date found')}
       ${row('Features', fmtInt(s.numeric.length + s.categorical.length + derived),
@@ -70,8 +70,17 @@ async function setFile(f) {
   $('schema-preview').hidden = true;
   $('train-btn').disabled = true;
 
+  // Only the head of a big file is needed to understand its columns; training uploads the whole thing once.
+  const PREVIEW_BYTES = 1.5 * 1024 * 1024;
   const form = new FormData();
-  form.append('file', f);
+  if (f.size > PREVIEW_BYTES) {
+    form.append('file', f.slice(0, PREVIEW_BYTES), f.name);
+    form.append('truncated', '1');
+    form.append('total_bytes', String(f.size));
+    form.append('sent_bytes', String(PREVIEW_BYTES));
+  } else {
+    form.append('file', f);
+  }
   try {
     $('schema-preview').innerHTML = '<div class="schema-title">Reading your file…</div><div class="skeleton" style="width:70%"></div>';
     $('schema-preview').hidden = false;

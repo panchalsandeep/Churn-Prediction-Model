@@ -12,8 +12,8 @@ import joblib
 import sqlalchemy as sa
 
 from . import config, db
+KEEP_MODELS = config.KEEP_MODELS
 
-KEEP_MODELS = 10
 _cache: OrderedDict[tuple[str, str], dict] = OrderedDict()
 _cache_lock = threading.Lock()
 CACHE_SIZE = 6

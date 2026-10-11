@@ -101,4 +101,39 @@ def test_model_quality_gate_on_demo_data(trained, client):
     assert results['lift'][0]['lift'] >= 2.0                  # top decile finds >=2x the base churn rate
     assert m['brier'] < (base / 100) * (1 - base / 100), m    # better calibrated than a constant guess
     assert results['model']['split'] == 'time'
-    assert len(results['model']['comparison']) == 3
+    assert len(results['model']['comparison']) == 4        # boosting, tuned boosting, logistic, forest
+
+
+def test_kaplan_meier_matches_hand_calculation():
+    from churn.training import kaplan_meier
+    t, s = kaplan_meier(np.array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10.]), np.array([1, 0, 1, 0, 1, 0, 1, 0, 1, 0]))
+    curve = dict(zip(t, s))
+    assert curve[1.0] == 0.9 and curve[3.0] == 0.7875 and curve[5.0] == 0.6562
+
+
+def test_training_plan_scales_down_with_data_size():
+    from churn.training import plan_for
+    small, medium, large = plan_for(5_000), plan_for(100_000), plan_for(400_000)
+    assert 'random_forest' in small['kinds'] and 'random_forest' not in large['kinds']
+    assert small['select_rows'] > large['select_rows'] and large['oof_outer'] <= small['oof_outer']
+    assert 'random_forest' in plan_for(40_000)['kinds'] and 'random_forest' not in medium['kinds']
+    assert {small['tier'], medium['tier'], large['tier']} == {'small', 'medium', 'large'}
+
+
+def test_personas_find_structure_and_survival_needs_tenure():
+    from churn.demo_data import generate_demo
+    from churn.schema import infer_schema, model_columns, normalize_target, prepare_features
+    from churn.training import build_personas, build_survival
+    df = generate_demo(1500, seed=5)
+    schema = infer_schema(df)
+    num, cat = model_columns(schema)
+    X = prepare_features(df, schema)[num + cat]
+    y = normalize_target(df['churn']).astype(int).to_numpy()
+    personas = build_personas(X, num, cat, y, np.full(len(y), y.mean()), df['monthly_charges'].to_numpy())
+    assert 2 <= len(personas) <= 6
+    assert abs(sum(p['share'] for p in personas) - 100) < 5 + 10                  # tiny clusters are dropped
+    assert personas == sorted(personas, key=lambda p: -p['churn_rate'])
+    surv = build_survival(df, X, schema, y)
+    assert surv and surv['overall']['s'][0] == 1.0 and surv['overall']['s'][-1] <= 1.0
+    assert build_survival(df.drop(columns=['tenure_months', 'signup_date']), X.drop(columns=['tenure_months', 'signup_date_age_days']),
+                          {**schema, 'tenure_col': None, 'signup_col': None}, y) is None

@@ -81,7 +81,8 @@ function renderPrediction(data) {
     ? `Expected loss ${fmtMoney(data.expected_loss)} · contacting this customer is worth ${fmtMoney(data.expected_net_value)} on average`
     : `Tier cut-offs: high ≥ ${(data.thresholds.high * 100).toFixed(0)}%, medium ≥ ${(data.thresholds.medium * 100).toFixed(0)}%`;
 
-  const key = data.recommendation.join('|');
+  // Probability-only updates (while dragging a slider) carry no explanation, so keep the current recommendations.
+  const key = data.impacts ? data.recommendation.join('|') : lastRecs;
   if (key !== lastRecs) {
     lastRecs = key;
     const list = $('recs-list');
@@ -123,7 +124,7 @@ function readForm() {
   return values;
 }
 
-const predictRequest = (values, { signal } = {}) => post('/predict', { values, explain: true }, { signal });
+const predictRequest = (values, { signal, explain = true } = {}) => post('/predict', { values, explain }, { signal });
 const whatIf = createWhatIf({ score: predictRequest, render: renderPrediction });
 
 /** Load a customer's known attributes into the form, then score them. */

@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <meta name="theme-color" content="#F3EFE6" />
+  <!-- In <head> (not imported from JS) so the very first paint is styled: no flash of unstyled content. -->
+  <link rel="stylesheet" href="/static/style.css" />
   <script>
     // Apply the saved/system theme before first paint to avoid a light flash.
     (function () {
@@ -16,11 +18,13 @@
         var saved = localStorage.getItem('churnsight-theme');
         var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
         if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        // A returning user sees one splash while the session is checked, not the login card flashing first.
+        if (localStorage.getItem('churnsight-session')) document.documentElement.classList.add('returning');
       } catch (e) {}
     })();
   </script>
 </head>
-<body class="cs-shell">
+<body class="cs-shell app-locked">
   <a class="skip-link" href="#main-content">Skip to content</a>
   <div class="ambient" aria-hidden="true">
     <span class="ambient-orb ambient-orb--a"></span>
@@ -134,7 +138,7 @@
     <div class="upload-hero">
       <div class="upload-hero-text">
         <h2>Train a churn model on your data</h2>
-        <p>Drop a CSV with a churn column. ChurnSight detects your schema, compares three models, calibrates the probabilities and evaluates on a time-aware holdout.</p>
+        <p>Drop a CSV with a churn column. ChurnSight detects your schema, compares and tunes several models, calibrates the probabilities and evaluates on a time-aware holdout.</p>
       </div>
     </div>
 
@@ -168,7 +172,7 @@
         <div class="algo-select-group">
           <label class="input-label">Model</label>
           <div class="algo-pills" id="algo-pills">
-            <button class="algo-pill active" data-algo="auto" type="button">Auto · best of 3</button>
+            <button class="algo-pill active" data-algo="auto" type="button">Auto · best of several</button>
             <button class="algo-pill" data-algo="gradient_boosting" type="button">Gradient Boosting</button>
             <button class="algo-pill" data-algo="logistic_regression" type="button">Logistic Regression</button>
             <button class="algo-pill" data-algo="random_forest" type="button">Random Forest</button>
@@ -344,9 +348,15 @@
         <p class="card-subtitle">Cells need at least 10 customers. Values come from the labelled data, not an estimate.</p>
       </div>
       <div class="card chart-card">
-        <h3 class="card-title">Retention by tenure band</h3>
+        <h3 class="card-title" id="survival-title">Retention by tenure</h3>
+        <p class="card-subtitle" id="survival-note"></p>
         <div class="chart-wrap"><canvas id="cohortTrendChart"></canvas></div>
       </div>
+    </div>
+    <div class="card personas-card reveal">
+      <h3 class="card-title">Customer personas</h3>
+      <p class="card-subtitle">Groups found automatically by clustering customer behaviour, independent of the churn label. Ranked by how often they churn.</p>
+      <div class="personas-grid" id="personas-grid"><div class="empty-card">Personas appear after training.</div></div>
     </div>
   </section>
 
@@ -658,7 +668,11 @@
   <p class="loading-text" id="loading-text">Working…</p>
 </div>
 <!-- ═══════════════════════════  FIREBASE AUTH OVERLAY  ═══════════════════════════ -->
-<div id="auth-overlay" class="auth-overlay" style="display: none;" aria-hidden="true">
+<div id="auth-overlay" class="auth-overlay is-visible" aria-hidden="false">
+  <div class="auth-splash" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="9" fill="#0B3D4A"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#F2E8D5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="10" r="2.4" fill="#E8A838"/></svg>
+    <span class="auth-splash-bar"></span>
+  </div>
   <div class="auth-sparkles" aria-hidden="true">
     <span></span><span></span><span></span><span></span><span></span><span></span>
   </div>

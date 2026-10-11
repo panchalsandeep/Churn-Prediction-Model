@@ -26,19 +26,20 @@ from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score
-from sklearn.model_selection import StratifiedKFold, cross_val_predict, cross_val_score
+from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, cross_val_predict, cross_val_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 from . import economics, metrics as M
-from .config import RANDOM_STATE
+from .config import RANDOM_STATE, TRAIN_TIME_BUDGET_S
 from .schema import infer_schema, model_columns, normalize_target, prepare_features
 
 warnings.filterwarnings('ignore')
 
-ALGORITHMS = ['auto', 'gradient_boosting', 'logistic_regression', 'random_forest']
+ALGORITHMS = ['auto', 'gradient_boosting', 'logistic_regression', 'random_forest']   # what users may force; 'auto' also tries the tuned variant
 PRETTY = {
     'gradient_boosting': 'Gradient Boosting',
+    'gradient_boosting_tuned': 'Gradient Boosting (tuned)',
     'logistic_regression': 'Logistic Regression',
     'random_forest': 'Random Forest',
 }
@@ -56,13 +57,44 @@ def clip_probs(p):
     return np.clip(p, PROB_FLOOR, PROB_CEIL)
 
 
+def plan_for(n: int) -> dict:
+    """Size-aware training plan: public hosting means one big upload must not starve everyone else.
+
+    small  (< 25k)    the full zoo, small search, 4-fold out-of-fold scoring
+    medium (< 150k)   linear + boosted (+ forest below 60k), selection on a 40k sample
+    large  (>= 150k)  linear + boosted only, selection on a 30k sample, 3-fold OOF with lighter calibration
+    """
+    if n < 25_000:
+        return {'tier': 'small', 'kinds': ['gradient_boosting', 'gradient_boosting_tuned', 'logistic_regression', 'random_forest'],
+                'select_rows': 60_000, 'oof_outer': 4, 'oof_inner': 2, 'tune_iter': 12}
+    if n < 150_000:
+        kinds = ['gradient_boosting', 'logistic_regression'] + (['gradient_boosting_tuned', 'random_forest'] if n < 60_000 else [])
+        return {'tier': 'medium', 'kinds': kinds, 'select_rows': 40_000, 'oof_outer': 3, 'oof_inner': 2, 'tune_iter': 8}
+    return {'tier': 'large', 'kinds': ['gradient_boosting', 'logistic_regression'], 'select_rows': 30_000, 'oof_outer': 3, 'oof_inner': 2, 'tune_iter': 0}
+
+
 def _noop(stage: str, pct: int) -> None:  # pragma: no cover
     pass
 
 
 # ── Pipelines ──────────────────────────────────────────────────────────────────
 
-def make_pipeline(kind: str, num_cols: list[str], cat_cols: list[str]) -> Pipeline:
+HGB_SPACE = {
+    'clf__learning_rate': [0.02, 0.04, 0.06, 0.1], 'clf__max_leaf_nodes': [6, 10, 16, 24, 31],
+    'clf__min_samples_leaf': [10, 20, 40, 80], 'clf__l2_regularization': [0, 0.5, 1, 3, 10], 'clf__max_iter': [150, 300, 500],
+}
+
+
+def tune_hgb(X: pd.DataFrame, y: np.ndarray, num_cols: list[str], cat_cols: list[str], n_iter: int) -> dict:
+    """Small randomised search for the boosted model, scored on PR-AUC. Benchmarks showed this is the one tuning step that pays."""
+    search = RandomizedSearchCV(make_pipeline('gradient_boosting', num_cols, cat_cols), HGB_SPACE, n_iter=n_iter,
+                                scoring='average_precision', refit=False, random_state=0, n_jobs=1,
+                                cv=StratifiedKFold(3, shuffle=True, random_state=0))
+    search.fit(X, y)
+    return {k.replace('clf__', ''): v for k, v in search.best_params_.items()}
+
+
+def make_pipeline(kind: str, num_cols: list[str], cat_cols: list[str], hgb_params: dict | None = None) -> Pipeline:
     num_steps = [('impute', SimpleImputer(strategy='median', add_indicator=True))]
     if kind == 'logistic_regression':
         num_steps.append(('scale', StandardScaler()))
@@ -79,11 +111,11 @@ def make_pipeline(kind: str, num_cols: list[str], cat_cols: list[str]) -> Pipeli
         clf = RandomForestClassifier(n_estimators=150, min_samples_leaf=8, max_features='sqrt', n_jobs=min(4, os.cpu_count() or 1),
                                      random_state=RANDOM_STATE)
     else:
-        clf = HistGradientBoostingClassifier(
-            max_iter=250, learning_rate=0.06, max_leaf_nodes=16, min_samples_leaf=30,
-            l2_regularization=1.0, early_stopping=True, n_iter_no_change=20, validation_fraction=0.15,
-            random_state=RANDOM_STATE,
-        )
+        params = dict(max_iter=250, learning_rate=0.06, max_leaf_nodes=16, min_samples_leaf=30, l2_regularization=1.0,
+                      early_stopping=True, n_iter_no_change=20, validation_fraction=0.15, random_state=RANDOM_STATE)
+        if kind == 'gradient_boosting_tuned' and hgb_params:
+            params.update(hgb_params)
+        clf = HistGradientBoostingClassifier(**params)
     return Pipeline([('pre', pre), ('clf', clf)])
 
 
@@ -312,6 +344,137 @@ def build_segments(scored: pd.DataFrame, attrs_cols: list[str]) -> list[dict]:
     return out
 
 
+
+# ── Survival (time-to-churn) ──────────────────────────────────────────────────
+
+def kaplan_meier(durations: np.ndarray, events: np.ndarray, max_points: int = 60) -> tuple[list[float], list[float]]:
+    """Kaplan–Meier survival curve: probability a customer is still active after t."""
+    order = np.argsort(durations, kind='stable')
+    d, e = durations[order], events[order]
+    s = 1.0
+    at_risk = len(d)
+    out_t, out_s = [0.0], [1.0]
+    idx = 0
+    for t in np.unique(d):
+        end = np.searchsorted(d, t, side='right')
+        ev = int(e[idx:end].sum())
+        if at_risk > 0 and ev:
+            s *= 1 - ev / at_risk
+        at_risk -= end - idx
+        idx = end
+        out_t.append(float(t))
+        out_s.append(round(float(s), 4))
+    if len(out_t) > max_points:                     # thin evenly, always keep the last point
+        keep = np.unique(np.linspace(0, len(out_t) - 1, max_points).astype(int))
+        out_t, out_s = [out_t[i] for i in keep], [out_s[i] for i in keep]
+    return out_t, out_s
+
+
+def _surv_at(t: list[float], s: list[float], at: float) -> float | None:
+    if not t or at > t[-1]:
+        return None
+    return s[int(np.searchsorted(t, at, side='right')) - 1]
+
+
+def build_survival(df: pd.DataFrame, X: pd.DataFrame, schema: dict, y: np.ndarray) -> dict | None:
+    """Retention-by-tenure curves. Needs a tenure measure; groups come from low-cardinality categoricals."""
+    tenure = _tenure_months(df, X, schema)
+    if tenure is None:
+        return None
+    ok = tenure.notna().to_numpy() & (tenure.to_numpy() >= 0)
+    if ok.sum() < 100:
+        return None
+    dur, ev = tenure.to_numpy()[ok].astype(float), y[ok].astype(int)
+    t, s = kaplan_meier(dur, ev)
+    median = next((tt for tt, ss in zip(t, s) if ss <= 0.5), None)
+    groups = {}
+    cats = sorted(schema['categorical'], key=lambda c: X[c].nunique())
+    for c in [c for c in cats if 2 <= X[c].nunique() <= 6][:3]:
+        curves = []
+        col = X[c].astype(str).to_numpy()[ok]
+        for value in pd.Series(col).value_counts().head(5).index:
+            m = col == value
+            if m.sum() >= 30:
+                gt, gs = kaplan_meier(dur[m], ev[m], max_points=40)
+                curves.append({'name': str(value), 't': gt, 's': gs, 'n': int(m.sum())})
+        if len(curves) >= 2:
+            groups[c] = {'label': c.replace('_', ' ').title(), 'curves': curves}
+    return {
+        'unit': 'months', 'n': int(ok.sum()), 'median': median,
+        's6': _surv_at(t, s, 6), 's12': _surv_at(t, s, 12), 's24': _surv_at(t, s, 24),
+        'overall': {'t': t, 's': s}, 'groups': groups,
+    }
+
+
+# ── Personas (clustering) ─────────────────────────────────────────────────────
+
+def build_personas(X: pd.DataFrame, num_cols: list[str], cat_cols: list[str], y: np.ndarray, p: np.ndarray,
+                   revenue: np.ndarray | None) -> list[dict]:
+    """Discover customer personas with k-means and describe each by what makes it different.
+
+    Unsupervised on purpose: it can reveal groups the churn label alone does not (for example a quiet,
+    low-spend segment that rarely complains and rarely leaves).
+    """
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import silhouette_score
+
+    n = len(X)
+    if n < 300 or len(num_cols) + len(cat_cols) < 3:
+        return []
+    rng = np.random.default_rng(RANDOM_STATE)
+    num = X[num_cols].apply(pd.to_numeric, errors='coerce')
+    num = num.fillna(num.median())
+    keep = [c for c in num_cols if num[c].std() > 0]
+    if len(keep) < 2:
+        return []
+    z = (num[keep] - num[keep].mean()) / num[keep].std()
+    parts = [z.clip(-4, 4)]
+    top_cats = [c for c in cat_cols if X[c].nunique() <= 8][:6]
+    if top_cats:
+        parts.append(pd.get_dummies(X[top_cats].astype(str)).astype(float) * 0.6)
+    M = pd.concat(parts, axis=1).to_numpy(dtype=float)
+
+    sample = rng.choice(n, min(n, 6000), replace=False)
+    best_k, best_score = 3, -1.0
+    for k in (3, 4, 5, 6):
+        km = KMeans(n_clusters=k, n_init=3, random_state=RANDOM_STATE).fit(M[sample])
+        sc = silhouette_score(M[sample], km.labels_, sample_size=min(len(sample), 3000), random_state=RANDOM_STATE)
+        if sc > best_score:
+            best_k, best_score = k, sc
+    labels = KMeans(n_clusters=best_k, n_init=5, random_state=RANDOM_STATE).fit(M[sample]).predict(M)
+
+    overall_rate = float(y.mean())
+    total_rev = float(revenue.sum()) if revenue is not None and revenue.sum() > 0 else None
+    personas = []
+    for c in range(best_k):
+        m = labels == c
+        if m.sum() < max(20, 0.02 * n):
+            continue
+        diffs = ((num.loc[m, keep].mean() - num[keep].mean()) / num[keep].std()).sort_values(key=lambda s_: -s_.abs())
+        traits = [{'feature': f, 'direction': 'high' if d > 0 else 'low', 'z': round(float(d), 2),
+                   'value': round(float(num.loc[m, f].mean()), 2), 'overall': round(float(num[f].mean()), 2)}
+                  for f, d in diffs.head(4).items() if abs(d) >= 0.25]
+        cat_traits = []
+        for cc in top_cats:
+            share = X.loc[m, cc].astype(str).value_counts(normalize=True)
+            base = X[cc].astype(str).value_counts(normalize=True)
+            top = share.index[0]
+            if share.iloc[0] >= 0.45 and share.iloc[0] - base.get(top, 0) >= 0.15:
+                cat_traits.append({'feature': cc, 'value': str(top), 'share': round(float(share.iloc[0]), 2)})
+        rate = float(y[m].mean())
+        personas.append({
+            'size': int(m.sum()), 'share': round(float(m.mean()) * 100, 1),
+            'churn_rate': round(rate * 100, 1), 'lift_vs_overall': round(rate / max(overall_rate, 1e-9), 2),
+            'avg_risk': round(float(p[m].mean()) * 100, 1),
+            'revenue_share': round(float(revenue[m].sum()) / total_rev * 100, 1) if total_rev else None,
+            'traits': traits, 'categories': cat_traits,
+        })
+    personas.sort(key=lambda d: -d['churn_rate'])
+    for i, d in enumerate(personas):
+        d['id'] = i + 1
+    return personas
+
+
 # ── Main entry ─────────────────────────────────────────────────────────────────
 
 def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = None, progress: Progress = _noop,
@@ -337,15 +500,27 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
 
     # 1) Candidate selection on the training part only
     progress('Comparing models', 15)
-    kinds = ['gradient_boosting', 'logistic_regression', 'random_forest'] if algorithm == 'auto' else [algorithm]
+    plan = plan_for(len(df))
+    kinds = plan['kinds'] if algorithm == 'auto' else [algorithm]
     sel_X, sel_y = Xtr, ytr
-    if len(Xtr) > 60000:
-        sub = np.random.default_rng(RANDOM_STATE).choice(len(Xtr), 60000, replace=False)
+    if len(Xtr) > plan['select_rows']:
+        sub = np.random.default_rng(RANDOM_STATE).choice(len(Xtr), plan['select_rows'], replace=False)
         sel_X, sel_y = Xtr.iloc[sub], ytr[sub]
     cv = StratifiedKFold(3, shuffle=True, random_state=RANDOM_STATE)
+    hp: dict = {}                                    # tuned boosting hyper-parameters, filled in when that candidate runs
     comparison = []
     for i, kind in enumerate(kinds):
-        score = cross_val_score(make_pipeline(kind, num_cols, cat_cols), sel_X, sel_y, cv=cv, scoring='average_precision')
+        if comparison and time.time() - t0 > TRAIN_TIME_BUDGET_S * 0.4:
+            break                                    # out of selection budget: go with what has been compared
+        if kind == 'gradient_boosting_tuned':
+            progress('Tuning gradient boosting', 15 + int(25 * i / len(kinds)))
+            tune_rows = min(len(sel_X), 20_000)
+            hp = tune_hgb(sel_X.iloc[:tune_rows], sel_y[:tune_rows], num_cols, cat_cols, plan['tune_iter'])
+            # Score it with different folds than the search used, so tuning can't flatter itself.
+            fold_cv = StratifiedKFold(3, shuffle=True, random_state=RANDOM_STATE + 1)
+        else:
+            fold_cv = cv
+        score = cross_val_score(make_pipeline(kind, num_cols, cat_cols, hp), sel_X, sel_y, cv=fold_cv, scoring='average_precision')
         comparison.append({'algorithm': kind, 'name': PRETTY[kind], 'cv_pr_auc': round(float(score.mean()) * 100, 2),
                            'cv_std': round(float(score.std()) * 100, 2)})
         progress('Comparing models', 15 + int(25 * (i + 1) / len(kinds)))
@@ -353,7 +528,7 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
 
     # 2) Calibrated model on train, evaluated on the untouched holdout
     progress('Calibrating probabilities', 45)
-    holdout_model = _calibrated(make_pipeline(best, num_cols, cat_cols), len(Xtr)).fit(Xtr, ytr)
+    holdout_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(Xtr)).fit(Xtr, ytr)
     p_test = clip_probs(holdout_model.predict_proba(Xte)[:, 1])
 
     base_rate = float(y.mean())
@@ -388,20 +563,23 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
 
     # 4) Honest per-customer scores: out-of-fold predictions
     progress('Scoring customers (out-of-fold)', 70)
-    outer = 4 if len(X) <= 100_000 else 3
-    oof_model = _calibrated(make_pipeline(best, num_cols, cat_cols), len(X) * (outer - 1) // outer, inner_cv=2)
+    outer = plan['oof_outer']
+    oof_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(X) * (outer - 1) // outer, inner_cv=plan['oof_inner'])
     p_oof = cross_val_predict(oof_model, X, y, cv=StratifiedKFold(outer, shuffle=True, random_state=RANDOM_STATE),
                               method='predict_proba')[:, 1]
     p_oof = clip_probs(p_oof)
 
     # 5) Deployable model on all the data
     progress('Fitting final model', 82)
-    final_model = _calibrated(make_pipeline(best, num_cols, cat_cols), len(X)).fit(X, y)
+    final_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(X)).fit(X, y)
 
     baseline = _baseline(X, num_cols, cat_cols)
     ranges = _feature_ranges(X, num_cols, cat_cols)
     drift_ref = _drift_reference(X, p_oof, num_cols, cat_cols)
     cohorts = build_cohorts(df, X, schema, y, p_oof)
+    progress('Finding customer personas', 86)
+    survival = build_survival(df, X, schema, y)
+    personas = build_personas(X, num_cols, cat_cols, y, p_oof, revenue)
 
     progress('Explaining high-risk customers', 90)
     top_idx = np.argsort(-p_oof)[:300]
@@ -421,10 +599,11 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
         'warnings': schema['warnings'], 'seconds': round(time.time() - t0, 1),
         'data_hash': dataset_hash(df), 'schema_signature': schema_signature(schema),
         'calibration_method': 'isotonic' if len(Xtr) >= ISOTONIC_MIN_ROWS else 'sigmoid',
+        'plan': plan['tier'],
     }
     progress('Finalising', 96)
     return {
         'bundle': bundle, 'meta': meta, 'evaluation': evaluation, 'importance': importance, 'cohorts': cohorts,
-        'schema': schema, 'thresholds': thresholds, 'econ': econ, 'df': df, 'X': X, 'y': y, 'p_oof': p_oof,
+        'schema': schema, 'survival': survival, 'personas': personas, 'thresholds': thresholds, 'econ': econ, 'df': df, 'X': X, 'y': y, 'p_oof': p_oof,
         'reasons_by_pos': reasons_by_pos, 'revenue': revenue,
     }

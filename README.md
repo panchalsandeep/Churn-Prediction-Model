@@ -74,6 +74,20 @@ The image builds the frontend and serves it with the API behind gunicorn. `FLASK
 
 **Vercel** still works for the frontend and light API use, but sklearn + pandas + firebase-admin is close to the function size limit, `/tmp` is per-instance (so models do not persist reliably), and training runs inline. Use a container for real workloads.
 
+## Benchmarks on real data
+
+The shipped pipeline (`algorithm='auto'`, random stratified split except where noted) on public churn datasets downloaded with `scripts/download_datasets.py`. Full model-family comparison and methodology: [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+
+| Dataset | Rows | Churn | ROC-AUC | PR-AUC (baseline) | Top-decile lift |
+|---|---|---|---|---|---|
+| Orange telecom | 3,333 | 14.5% | 94.1 | 90.8 (14.5) | 6.7× |
+| Bank customers | 10,000 | 20.4% | 86.1 | 69.6 (20.4) | 4.0× |
+| IBM Telco | 7,043 | 26.5% | 84.2 | 66.5 (26.5) | 2.8× |
+
+## Scale
+
+Designed to be hosted publicly: size-aware training, a bounded job queue with per-workspace limits, SQL paging with cached counts, keyset exports, capped deep paging, results caching, retention limits. Details and the measured 100,000-row run are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md#scale); `scripts/loadtest.py` and `scripts/scale_test.py` reproduce them.
+
 ## Tests and CI
 
 ```bash

@@ -1,0 +1,16 @@
+  orange  15% Comparing models
+  orange  45% Calibrating probabilities
+  orange  70% Scoring customers (out-of-fold)
+  orange  96% Finalising
+orange: winner Gradient Boosting (tuned) · ROC-AUC 94.08 · PR-AUC 90.8 (base 14.54) · Brier 0.0332 · top-decile lift 6.67 · 39.8s
+  telco  15% Comparing models
+  telco  45% Calibrating probabilities
+  telco  70% Scoring customers (out-of-fold)
+  telco  96% Finalising
+telco: winner Gradient Boosting (tuned) · ROC-AUC 84.21 · PR-AUC 66.45 (base 26.54) · Brier 0.1361 · top-decile lift 2.83 · 36.8s
+  bank  15% Comparing models
+  bank  45% Calibrating probabilities
+  bank  70% Scoring customers (out-of-fold)
+  bank  96% Finalising
+bank: winner Gradient Boosting (tuned) · ROC-AUC 86.1 · PR-AUC 69.61 (base 20.39) · Brier 0.1039 · top-decile lift 3.95 · 28.1s
+saved C:\Users\SANDEEP PANCHAL\OneDrive\Desktop\Siddh\Projects\Churn-prediction\datasets\results\product_run.json

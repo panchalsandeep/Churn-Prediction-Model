@@ -1,0 +1,14 @@
+target: http://127.0.0.1:5056 · 100,000 customers · 20 threads · 20s
+
+endpoint                                        req  err     p50     p95     p99  (ms)
+GET /api/results                                 96    0     116     388     615
+GET /api/customers (page, sort by risk)         162    0     176     433     545
+GET /api/customers (tier=High, by loss)          96    0     160     407     549
+GET /api/customers (search id)                   81    0     197     423     514
+GET /api/customers/<id>                          89    0    2668    3486    3765
+POST /api/predict (explain)                      44    0    3400    3966    4289
+GET /api/alerts                                  24    0     143     480     534
+
+total 592 requests in 22.0s = 27 req/s · 0 errors · overall p50 188 ms, p95 3400 ms
+uploading 100,000 rows (14.0 MB)…
+training job: done in 72s

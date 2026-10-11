@@ -230,3 +230,39 @@ def test_telco_style_csv_trains_end_to_end(client, env):
     assert client.get('/api/customers?limit=3').get_json()['total'] == n
     top = client.get('/api/customers?limit=1').get_json()['customers'][0]
     assert client.get(f"/api/customers/{top['id']}").get_json()['reasons']
+
+
+def test_job_admission_one_per_workspace_and_busy_server(client, env, monkeypatch):
+    """Back-pressure: a workspace can't pile up jobs, and a saturated server answers 503 with Retry-After."""
+    import sqlalchemy as sa
+    from churn import config, db, jobs
+    # Pretend this workspace already has a job running.
+    with db.get_engine().begin() as c:
+        c.execute(db.jobs_t.insert().values(id='stuck1', workspace_id='local', kind='train', status='running', progress=10,
+                                            stage='x', created_at=__import__('time').time()))
+    res = client.post('/api/upload', data={'file': (io.BytesIO(b'a,b\n1,2\n'), 'x.csv')}, content_type='multipart/form-data')
+    assert res.status_code == 409 and 'in progress' in res.get_json()['error']
+    with db.get_engine().begin() as c:
+        c.execute(sa.delete(db.jobs_t).where(db.jobs_t.c.id == 'stuck1'))
+    monkeypatch.setattr(config, 'MAX_QUEUED_JOBS', 0)
+    res = client.post('/api/upload', data={'file': (io.BytesIO(b'a,b\n1,2\n'), 'x.csv')}, content_type='multipart/form-data')
+    assert res.status_code == 503 and res.headers['Retry-After']
+
+
+def test_deep_paging_is_capped_but_export_streams_everything(trained, client, monkeypatch):
+    from churn import config
+    monkeypatch.setattr(config, 'MAX_OFFSET', 100)
+    ok = client.get('/api/customers?page=5&limit=20')            # offset 80
+    assert ok.status_code == 200
+    deep = client.get('/api/customers?page=20&limit=20')         # offset 380
+    assert deep.status_code == 400 and 'not reachable' in deep.get_json()['error']
+    total = client.get('/api/results').get_json()['summary']['total_customers']
+    text = client.get('/api/customers/export?sort=loss').get_data(as_text=True)
+    assert len(text.strip().splitlines()) == total + 1           # header + every customer, via keyset paging
+
+
+def test_tier_counts_are_cached_and_stay_correct(trained, client):
+    r = client.get('/api/results').get_json()['summary']
+    total = client.get('/api/customers?limit=1').get_json()['total']
+    assert total == r['total_customers'] == r['high_risk'] + r['medium_risk'] + r['low_risk']
+    assert client.get('/api/customers?tier=High&limit=1').get_json()['total'] == r['high_risk']

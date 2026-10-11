@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Any
 
@@ -9,7 +10,7 @@ import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 
-from . import db, economics, registry, training
+from . import config, db, economics, registry, training
 from .config import data_dir
 from .schema import prepare_features
 
@@ -19,6 +20,8 @@ DEFAULT_SETTINGS = {
     'alert_rules': {'high_risk': {'enabled': True}, 'risk_jump': {'enabled': True, 'delta': 0.15}},
     'revenue_column': None,
 }
+# Explanations are the CPU-heavy part of serving. A small gate keeps a burst of them from starving cheap reads.
+_explain_gate = threading.BoundedSemaphore(config.MAX_CONCURRENT_EXPLAIN)
 MAX_ALERTS = 300
 REASON_ROWS = 300
 
@@ -33,8 +36,15 @@ ACTION_RULES = [
 ]
 
 
+def explain_cols(bundle: dict) -> list[str]:
+    """Perturb only the most important features: 23 columns cost 2x what 12 do, and the long tail barely moves a score."""
+    ranked = [d['feature'] for d in bundle['importance'] if d['feature'] in bundle['cols']]
+    return (ranked or bundle['cols'])[:config.EXPLAIN_TOP_FEATURES]
+
+
 def humanize(name: str) -> str:
-    return name.replace('_age_days', ' (days)').replace('_', ' ')
+    import re
+    return re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', name.replace('_age_days', ' (days)')).replace('_', ' ').lower()
 
 
 # ── Settings ────────────────────────────────────────────────────────────────────
@@ -169,7 +179,14 @@ def build_scored_frame(ws: str, bundle: dict, df: pd.DataFrame, settings: dict, 
     for c in schema['dates']:
         if c in attrs_df:
             attrs_df[c] = pd.to_datetime(attrs_df[c], errors='coerce').dt.strftime('%Y-%m-%d')
-    attrs = [db.dumps({k: _clean_attr(v) for k, v in rec.items()}) for rec in attrs_df.astype(object).to_dict('records')]
+    # At scale, raw attributes are kept for every customer up to ATTRS_MAX_ROWS and above that only for the
+    # riskiest ATTRS_TOP_ROWS (by expected loss). Scores, tiers and alerts always cover everyone.
+    keep_attrs = np.ones(n, dtype=bool)
+    if n > config.ATTRS_MAX_ROWS:
+        keep_attrs[:] = False
+        keep_attrs[np.argsort(-(probs * revenue))[:config.ATTRS_TOP_ROWS]] = True
+    attrs = [db.dumps({k: _clean_attr(v) for k, v in rec.items()}) if keep else None
+             for rec, keep in zip(attrs_df.astype(object).to_dict('records'), keep_attrs)]
 
     scored = pd.DataFrame({
         'customer_id': ids, 'prob': probs, 'revenue': revenue, 'tenure': tenure, 'activity': activity,
@@ -184,7 +201,7 @@ def build_scored_frame(ws: str, bundle: dict, df: pd.DataFrame, settings: dict, 
     top = np.argsort(-scored['prob'].to_numpy())[:REASON_ROWS]
     reasons: list[str | None] = [None] * len(scored)
     drivers: list[str | None] = [None] * len(scored)
-    computed = training.explain_rows(bundle['model'], X_dedup.iloc[top], bundle['baseline'], cols) if reasons_by_pos is None or len(scored) != n \
+    computed = training.explain_rows(bundle['model'], X_dedup.iloc[top], bundle['baseline'], explain_cols(bundle)) if reasons_by_pos is None or len(scored) != n \
         else [reasons_by_pos.get(int(i)) or [] for i in top]
     for pos, rs in zip(top, computed):
         reasons[pos] = db.dumps(rs)
@@ -211,11 +228,23 @@ def persist_scores(ws: str, model_id: str, scored: pd.DataFrame) -> None:
             })
         for i in range(0, len(rows), 5000):
             conn.execute(db.customers_t.insert(), rows[i:i + 5000])
+    refresh_counts(ws)
+
+
+def refresh_counts(ws: str) -> dict:
+    """Cache per-tier counts (and bump the data revision) so paging never has to COUNT(*) a big table."""
+    cu = db.customers_t
+    with db.get_engine().connect() as c:
+        counts = {r.tier: int(r.n) for r in c.execute(sa.select(cu.c.tier, sa.func.count().label('n')).where(cu.c.workspace_id == ws).group_by(cu.c.tier))}
+    counts = {t: counts.get(t, 0) for t in ('High', 'Medium', 'Low')}
+    kv_set(ws, 'counts', counts)
+    kv_set(ws, 'rev', time.time())
+    return counts
 
 
 def save_snapshot(ws: str, model_id: str, scored: pd.DataFrame) -> str:
     path = os.path.join(registry.model_dir(ws, model_id), 'customers.csv.gz')
-    scored.to_csv(path, index=False, compression='gzip')
+    scored.to_csv(path, index=False, compression={'method': 'gzip', 'compresslevel': 3})
     return path
 
 
@@ -320,6 +349,20 @@ def _categorical_attr_names(schema: dict) -> list[str]:
     return [c for c in schema['categorical']][:6]
 
 
+def segments_from_frame(ws: str, bundle: dict, scored: pd.DataFrame, X: pd.DataFrame) -> list[dict]:
+    """Segments without re-reading the database: the scored frame and features are already in memory."""
+    cats = [c for c in _categorical_attr_names(bundle['schema']) if c in X.columns]
+    frame = pd.DataFrame({'prob': scored['prob'].to_numpy(), 'expected_loss': scored['expected_loss'].to_numpy(), 'tier': scored['tier'].to_numpy()})
+    if len(frame) != len(X):                     # duplicate customer ids were dropped while scoring
+        kv_set(ws, 'segments', [])
+        return refresh_segments(ws, bundle)
+    for c in cats:
+        frame[c] = X[c].to_numpy()
+    out = training.build_segments(frame, cats) if cats else []
+    kv_set(ws, 'segments', out)
+    return out
+
+
 def refresh_segments(ws: str, bundle: dict) -> list[dict]:
     schema = bundle['schema']
     cats = _categorical_attr_names(schema)
@@ -386,17 +429,29 @@ def query_customers(ws: str, tier: str | None = None, q: str | None = None, sort
     cond = [cu.c.workspace_id == ws]
     if tier in ('High', 'Medium', 'Low'):
         cond.append(cu.c.tier == tier)
+    counts = kv_get(ws, 'counts') or {}
+    population = sum(counts.values()) if counts else 0
     if q:
-        like = f'%{q.lower()}%'
-        cond.append(sa.or_(sa.func.lower(cu.c.customer_id).like(like), sa.func.lower(sa.func.coalesce(cu.c.attrs, '')).like(like),
-                           sa.func.lower(sa.func.coalesce(cu.c.top_driver, '')).like(like)))
+        needle = q.lower()
+        if population > config.SEARCH_SCAN_MAX:
+            # Substring scans over JSON attributes don't scale; large workspaces search IDs by prefix (index-friendly).
+            cond.append(sa.and_(cu.c.customer_id >= q, cu.c.customer_id < q + '\uffff'))   # case-sensitive prefix: uses the primary-key index
+        else:
+            like = f'%{needle}%'
+            cond.append(sa.or_(sa.func.lower(cu.c.customer_id).like(like), sa.func.lower(sa.func.coalesce(cu.c.attrs, '')).like(like),
+                               sa.func.lower(sa.func.coalesce(cu.c.top_driver, '')).like(like)))
     if ids:
         cond.append(cu.c.customer_id.in_(ids))
     col = cu.c[SORTS.get(sort, 'prob')]
     order = col.asc() if direction == 'asc' else col.desc()
     page, limit = max(1, page), max(1, min(limit, 500))
+    if (page - 1) * limit > config.MAX_OFFSET:
+        raise ValueError(f'Pages beyond {config.MAX_OFFSET:,} rows are not reachable. Narrow with a filter or use export.')
     with db.get_engine().connect() as c:
-        total = c.execute(sa.select(sa.func.count()).select_from(cu).where(*cond)).scalar() or 0
+        if not q and not ids and counts:
+            total = counts.get(tier) if tier in counts else sum(counts.values())
+        else:
+            total = c.execute(sa.select(sa.func.count()).select_from(cu).where(*cond)).scalar() or 0
         rows = c.execute(sa.select(cu).where(*cond).order_by(order.nulls_last(), cu.c.customer_id).limit(limit).offset((page - 1) * limit)).all()
     return {'customers': [_customer_row(r) for r in rows], 'total': int(total), 'page': page, 'limit': limit,
             'pages': max(1, -(-int(total) // limit))}
@@ -410,7 +465,7 @@ def customer_detail(ws: str, customer_id: str) -> dict | None:
         return None
     attrs = db.loads(r.attrs, {})
     reasons = db.loads(r.reasons)
-    if reasons is None:                       # beyond the pre-computed top-N: explain on demand
+    if reasons is None and attrs:             # beyond the pre-computed top-N: explain on demand
         row, bundle = registry.champion_bundle(ws)
         if bundle:
             try:
@@ -418,11 +473,13 @@ def customer_detail(ws: str, customer_id: str) -> dict | None:
                 X = prepare_features(raw, bundle['schema']).reindex(columns=bundle['cols'])
                 for cc in bundle['cat_cols']:
                     X[cc] = X[cc].fillna('Missing')
-                reasons = training.explain_rows(bundle['model'], X, bundle['baseline'], bundle['cols'])[0]
+                with _explain_gate:
+                    reasons = training.explain_rows(bundle['model'], X, bundle['baseline'], explain_cols(bundle))[0]
             except Exception:  # noqa: BLE001
                 reasons = []
     detail = _customer_row(r)
     detail['attrs'] = attrs
+    detail['attrs_retained'] = bool(attrs)
     detail['reasons'] = [{**x, 'label': humanize(x['feature'])} for x in (reasons or [])]
     detail['recommendations'] = recommendations(reasons or [], r.tier)
     detail['interventions'] = list_interventions(ws, customer_id)
@@ -496,7 +553,8 @@ def predict(ws: str, values: dict, explain: bool = True) -> dict:
         out['expected_net_value'] = round(economics.expected_net_value(prob, record[rev_col], settings['economics']), 2)
     impacts = []
     if explain:
-        impacts = training.explain_rows(bundle['model'], X, bundle['baseline'], bundle['cols'], top_n=len(bundle['cols']))[0]
+        with _explain_gate:
+            impacts = training.explain_rows(bundle['model'], X, bundle['baseline'], explain_cols(bundle), top_n=len(bundle['cols']))[0]
         out['impacts'] = [{**i, 'label': humanize(i['feature'])} for i in impacts]
     out['recommendation'] = recommendations(impacts, tier)
     return out
@@ -561,7 +619,60 @@ def intervention_summary(ws: str) -> dict:
 
 # ── Results payload ────────────────────────────────────────────────────────────
 
+_results_cache: dict[str, tuple] = {}
+
+
+def bump(ws: str) -> None:
+    """Invalidate cached payloads for a workspace (works across processes because the revision lives in the DB)."""
+    kv_set(ws, 'rev', time.time())
+    _results_cache.pop(ws, None)
+    _results_bytes.pop(ws, None)
+
+
 def build_results(ws: str) -> dict | None:
+    """Results payload with a short cache keyed by the DB revision, so dashboards don't re-aggregate on every view."""
+    rev = kv_get(ws, 'rev')
+    hit = _results_cache.get(ws)
+    if hit and hit[0] == rev and time.time() - hit[1] < config.RESULTS_CACHE_TTL_S:
+        return hit[2]
+    payload = _build_results(ws, rev)
+    if payload is not None:
+        _results_cache[ws] = (rev, time.time(), payload)
+    return payload
+
+
+_results_bytes: dict[str, tuple] = {}
+
+
+def results_bytes(ws: str):
+    """(etag, raw_json, gzipped_json) for the dashboard payload, rebuilt only when the data revision changes."""
+    import gzip
+    import hashlib
+    rev = kv_get(ws, 'rev')
+    hit = _results_bytes.get(ws)
+    if hit and hit[0] == rev and time.time() - hit[1] < config.RESULTS_CACHE_TTL_S:
+        return hit[2]
+    payload = build_results(ws)
+    if payload is None:
+        return None
+    raw = db.dumps(payload).encode()
+    packed = (hashlib.md5(raw).hexdigest(), raw, gzip.compress(raw, compresslevel=5))
+    _results_bytes[ws] = (rev, time.time(), packed)
+    return packed
+
+
+def _cached_summary(ws: str, rev, settings: dict, thresholds: dict) -> dict:
+    """The aggregate scans over the customers table are the slowest read at scale, so persist them per data revision."""
+    stored = kv_get(ws, 'summary')
+    if stored and rev is not None and stored.get('rev') == rev:
+        return stored['data']
+    data = summary(ws, settings, thresholds)
+    if rev is not None:
+        kv_set(ws, 'summary', {'rev': rev, 'data': data})
+    return data
+
+
+def _build_results(ws: str, rev=None) -> dict | None:
     row = registry.champion(ws)
     if not row:
         return None
@@ -588,7 +699,8 @@ def build_results(ws: str) -> dict | None:
         'score_distribution': ev['score_distribution'],
         'feature_importance': [{**i, 'label': humanize(i['feature'])} for i in meta['importance'][:15]],
         'cohorts': meta['cohorts'], 'segments': kv_get(ws, 'segments', []),
-        'summary': summary(ws, settings, thresholds), 'thresholds': thresholds, 'economics': settings['economics'],
+        'survival': meta.get('survival'), 'personas': meta.get('personas', []),
+        'summary': _cached_summary(ws, rev, settings, thresholds), 'thresholds': thresholds, 'economics': settings['economics'],
         'schema': {k: schema[k] for k in ('target', 'id', 'time_col', 'signup_col', 'numeric', 'categorical', 'dates', 'dropped',
                                           'revenue_col', 'tenure_col', 'activity_col', 'warnings', 'rows', 'positive_rate')},
         'has_revenue': bool(settings.get('revenue_column') or schema.get('revenue_col')),
@@ -600,10 +712,19 @@ def build_results(ws: str) -> dict | None:
 
 def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, progress, promote: bool | None = None,
                  source: str = 'upload', target: str | None = None) -> dict:
+    steps: dict[str, float] = {}
+    mark = [time.perf_counter()]
+
+    def lap(name: str) -> None:
+        now = time.perf_counter()
+        steps[name] = round(now - mark[0], 2)
+        mark[0] = now
+
     settings = get_settings(ws)
     result = training.train_model(df, algorithm, settings['economics'], progress, target)
     bundle, meta = result['bundle'], result['meta']
     meta['source'] = source
+    lap('train')
     progress('Saving model and scores', 97)
 
     scored = build_scored_frame(ws, bundle, result['df'], settings, X=result['X'], probs=result['p_oof'],
@@ -612,17 +733,27 @@ def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, p
     meta['evaluation'] = evaluation
     meta['importance'] = result['importance']
     meta['cohorts'] = result['cohorts']
+    meta['survival'] = result['survival']
+    meta['personas'] = result['personas']
 
+    lap('build scored frame')
     model_id = db.new_id()
     snapshot = save_snapshot(ws, model_id, scored)
+    lap('write snapshot')
     status, reason = registry.register(ws, model_id, bundle, meta, evaluation['metrics'], snapshot, promote)
+    lap('register model')
     if status == 'champion':
         persist_scores(ws, model_id, scored)
+        lap('persist customers')
         regenerate_alerts(ws, settings)
-        refresh_segments(ws, bundle)
+        lap('alerts')
+        segments_from_frame(ws, bundle, scored, result['X'])
+        lap('segments')
         kv_set(ws, 'drift', None)
-    db.audit(ws, actor, 'model.train', {'model_id': model_id, 'status': status, 'rows': meta['rows'], 'pr_auc': evaluation['metrics']['pr_auc']})
-    return {'model_id': model_id, 'status': status, 'reason': reason, 'metrics': evaluation['metrics'], 'warnings': meta['warnings']}
+        bump(ws)
+        build_results(ws)                        # warm: persists the summary for the first dashboard view
+    db.audit(ws, actor, 'model.train', {'model_id': model_id, 'status': status, 'rows': meta['rows'], 'pr_auc': evaluation['metrics']['pr_auc'], 'steps': steps})
+    return {'model_id': model_id, 'status': status, 'reason': reason, 'metrics': evaluation['metrics'], 'warnings': meta['warnings'], 'steps': steps}
 
 
 def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
@@ -641,6 +772,8 @@ def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
         regenerate_alerts(ws, settings)
         refresh_segments(ws, bundle)
         kv_set(ws, 'drift', None)
+        bump(ws)
+        build_results(ws)
     db.audit(ws, actor, 'model.promote', {'model_id': model_id})
     return {'model_id': model_id}
 
@@ -661,8 +794,10 @@ def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress) ->
     progress('Saving scores', 70)
     persist_scores(ws, row['id'], scored)
     regenerate_alerts(ws, settings)
-    refresh_segments(ws, bundle)
+    segments_from_frame(ws, bundle, scored, X)
     kv_set(ws, 'drift', drift)
+    bump(ws)
+    build_results(ws)
     with db.get_engine().begin() as c:
         c.execute(db.score_batches_t.insert().values(id=db.new_id(), workspace_id=ws, model_id=row['id'], created_at=time.time(),
                                                      rows=int(len(scored)), drift=db.dumps(drift)))
@@ -682,24 +817,48 @@ def apply_settings_change(ws: str) -> None:
     tier = sa.case((cu.c.prob >= thr['high'], 'High'), (cu.c.prob >= thr['medium'], 'Medium'), else_='Low')
     with db.get_engine().begin() as c:
         c.execute(sa.update(cu).where(cu.c.workspace_id == ws).values(tier=tier, expected_loss=cu.c.prob * cu.c.revenue * econ['value_months']))
+    refresh_counts(ws)
     regenerate_alerts(ws, settings)
     refresh_segments(ws, bundle)
+    bump(ws)
+    build_results(ws)
 
 
-def export_csv_rows(ws: str, tier: str | None, q: str | None, ids: list[str] | None, sort: str, direction: str, cap: int = 200_000):
-    """Yield CSV-safe rows for export (formula injection neutralised)."""
+def export_csv_rows(ws: str, tier: str | None, q: str | None, ids: list[str] | None, sort: str, direction: str, cap: int = 500_000):
+    """Yield CSV-safe rows for export (formula injection neutralised).
+
+    Uses keyset pagination (WHERE (sort_col, id) < last) so exporting a huge workspace stays O(n)
+    instead of the O(n²) of ever-deeper OFFSETs.
+    """
     from .security import csv_safe
+    cu = db.customers_t
     header = ['customer_id', 'risk_level', 'churn_probability_pct', 'monthly_revenue', 'expected_loss', 'tenure', 'top_driver', 'actual_churn']
     yield [csv_safe(h) for h in header]
-    page = 1
-    sent = 0
+
+    sort_key = sort if sort in ('prob', 'loss', 'revenue') else 'prob'
+    col = cu.c[SORTS[sort_key]]
+    desc = direction != 'asc'
+    cond = [cu.c.workspace_id == ws]
+    if tier in ('High', 'Medium', 'Low'):
+        cond.append(cu.c.tier == tier)
+    if q:
+        cond.append(sa.func.lower(cu.c.customer_id).like(f'%{q.lower()}%'))
+    if ids:
+        cond.append(cu.c.customer_id.in_(ids))
+    order = (col.desc(), cu.c.customer_id.desc()) if desc else (col.asc(), cu.c.customer_id.asc())
+    last, sent = None, 0
     while sent < cap:
-        res = query_customers(ws, tier, q, sort, direction, page=page, limit=500, ids=ids)
-        if not res['customers']:
+        where = list(cond)
+        if last is not None:
+            pair, bound = sa.tuple_(col, cu.c.customer_id), sa.tuple_(*last)
+            where.append(pair < bound if desc else pair > bound)
+        with db.get_engine().connect() as c:
+            rows = c.execute(sa.select(cu).where(*where).order_by(*order).limit(2000)).all()
+        if not rows:
             break
-        for c in res['customers']:
-            yield [csv_safe(v) for v in (c['id'], c['risk_level'], c['churn_prob'], c['revenue'], c['expected_loss'], c['tenure'], c['top_driver'], c['actual'])]
-            sent += 1
-        if page >= res['pages']:
-            break
-        page += 1
+        for r in rows:
+            cust = _customer_row(r)
+            yield [csv_safe(v) for v in (cust['id'], cust['risk_level'], cust['churn_prob'], cust['revenue'], cust['expected_loss'],
+                                         cust['tenure'], cust['top_driver'], cust['actual'])]
+        sent += len(rows)
+        last = (getattr(rows[-1], SORTS[sort_key]), rows[-1].customer_id)

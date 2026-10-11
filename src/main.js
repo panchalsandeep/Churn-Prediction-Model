@@ -3,8 +3,6 @@
    Navigation, auth and results loading live here; each page is a module in src/views/.
 ═══════════════════════════════════════════════════════════════ */
 
-import '../static/style.css';
-
 import { loadFirebase } from './lib/firebase.js';
 import { initTheme, toggleTheme } from './lib/theme.js';
 import { initPalette } from './lib/palette.js';
@@ -202,26 +200,26 @@ qsa('.kpi-card[data-risk]').forEach(card => card.addEventListener('click', () =>
 /* ══════════════════  FIREBASE AUTH  ════════════════════════ */
 let activeAuthTab = 'login';
 
+const SESSION_HINT = 'churnsight-session';
+
+/** Signed out (or session expired): show the login card. The overlay is already in the first paint. */
 function showAuthOverlay() {
   const overlay = $('auth-overlay');
+  document.documentElement.classList.remove('returning');
+  document.body.classList.add('app-locked');
   overlay.style.display = 'flex';
   overlay.style.opacity = '1';
   overlay.setAttribute('aria-hidden', 'false');
-  overlay.classList.remove('is-visible');
-  void overlay.offsetWidth;
-  requestAnimationFrame(() => overlay.classList.add('is-visible'));
+  overlay.classList.add('is-visible');
 }
 
+/** Signed in: reveal the app and fade the overlay away. */
 function hideAuthOverlay() {
   const overlay = $('auth-overlay');
-  overlay.classList.remove('is-visible');
-  overlay.classList.add('is-leaving');
+  document.body.classList.remove('app-locked');
   overlay.style.opacity = '0';
   overlay.setAttribute('aria-hidden', 'true');
-  setTimeout(() => {
-    overlay.style.display = 'none';
-    overlay.classList.remove('is-leaving');
-  }, 420);
+  setTimeout(() => { overlay.style.display = 'none'; }, 380);
 }
 
 function setAuthTab(tab) {
@@ -282,7 +280,6 @@ async function refreshAdminAccess() {
 }
 
 async function initAuthUI() {
-  showAuthOverlay();
   $('tab-login').addEventListener('click', () => setAuthTab('login'));
   $('tab-register').addEventListener('click', () => setAuthTab('register'));
   $('auth-form').addEventListener('submit', handleEmailAuth);
@@ -293,6 +290,7 @@ async function initAuthUI() {
   try {
     fb = await loadFirebase();
   } catch {
+    showAuthOverlay();   // drop the splash so the card (and the error) is visible
     showToast('Could not load sign-in. Check your connection and reload.', 'error');
     return;
   }
@@ -307,6 +305,7 @@ async function initAuthUI() {
       $('user-display-name').textContent = user.displayName || 'Team Member';
       $('user-display-email').textContent = user.email;
       $('user-profile-section').style.display = 'flex';
+      try { localStorage.setItem(SESSION_HINT, '1'); } catch { /* ignore */ }
       hideAuthOverlay();
       showToast(`Welcome back, ${user.displayName || user.email}!`);
       await refreshAdminAccess();
@@ -315,6 +314,7 @@ async function initAuthUI() {
       state.user = null;
       state.admin.isAdmin = false;
       $('user-profile-section').style.display = 'none';
+      try { localStorage.removeItem(SESSION_HINT); } catch { /* ignore */ }
       showAuthOverlay();
       await reloadResults();
     }

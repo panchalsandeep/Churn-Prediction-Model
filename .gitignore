@@ -14,3 +14,7 @@ dist/
 .venv/
 venv/
 *.egg-info/
+
+# Public benchmark datasets are downloaded by scripts/download_datasets.py, never committed
+datasets/raw/
+datasets/ready/

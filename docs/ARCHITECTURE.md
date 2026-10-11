@@ -38,5 +38,27 @@ Flask API  (api/index.py)  ── auth → workspace → rate limit → handler
 ### Why not deep learning or a GenAI model?
 On tabular customer snapshots of this size, gradient-boosted trees match or beat neural networks, train in seconds, calibrate well and explain themselves. Deep sequence models (LSTM/Transformer) earn their keep with raw event streams at millions of rows (e.g. KKBox); the right next step there is a feature store and rolling-window features, which the demo generator already imitates. An LLM would help write retention messages, not predict churn.
 
+## Running it for the public
+
+| Concern | What the code does |
+|---|---|
+| One huge upload starving everyone | `plan_for(n)` picks the work by data size: small data gets the full zoo plus tuning, 60k+ rows drop the forest, 150k+ rows use linear + boosted only on a 30k selection sample. A wall-clock budget (`TRAIN_TIME_BUDGET_S`) stops adding candidates. |
+| Job pile-ups | At most `MAX_CONCURRENT_JOBS` run at once; one active job per workspace (409); a bounded queue (`MAX_QUEUED_JOBS`, then 503 + `Retry-After`); queue position is shown in the UI; finished jobs expire after `JOB_RETENTION_DAYS`. |
+| Big tables | Paging, sorting, filtering are SQL with composite indexes; per-tier counts are cached so paging never runs `COUNT(*)`; `OFFSET` is capped (`MAX_OFFSET`); exports use keyset pagination (O(n), not O(n²)); on workspaces over 100k customers search is ID-prefix only because substring scans do not scale. |
+| Per-customer storage | Raw attributes are kept for every customer up to `ATTRS_MAX_ROWS` and, above that, for the riskiest `ATTRS_TOP_ROWS`. Scores, tiers and alerts always cover everyone. |
+| Repeated dashboard loads | The results payload is cached for a few seconds, keyed by a revision stored in the database, so it invalidates across processes. |
+| Disk growth | Only `KEEP_MODELS` versions per workspace are retained; each version's scored snapshot goes with it. |
+| Abuse | Auth required, per-user rate limits (stricter for heavy endpoints), upload byte and row caps, formula-safe exports. |
+
+Still single-node by design: rate limiting is in-process (put Redis behind several instances), jobs run in-process (move to a worker queue such as RQ/Celery when you outgrow one box), and SQLite should give way to Postgres (`DATABASE_URL`) for anything shared.
+
+## More than one way to look at churn
+
+* **Predictive model** (calibrated, tuned boosting chosen against linear and forest baselines) for "who, how likely".
+* **Survival analysis** (Kaplan–Meier by tenure, split by contract-like attributes) for "when, and how long do customers last".
+* **Personas** (k-means on behaviour, ignoring the label) for "what kinds of customers do we have, and which are fragile".
+* **Cohorts** (observed churn by group × tenure band) for "where is it actually happening".
+* **Drift** (PSI) for "has the world changed since we trained".
+
 ## What is deliberately not here yet
 Event-level ingestion and a feature store, survival (time-to-churn) and uplift models (the intervention log exists to enable them), SSO/SAML and fine-grained roles, shared rate limiting (Redis) behind multiple instances, a Playwright end-to-end suite, and warehouse/CRM connectors.

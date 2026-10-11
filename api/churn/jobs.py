@@ -17,7 +17,15 @@ import sqlalchemy as sa
 from . import config, db
 
 log = logging.getLogger('churnsight.jobs')
-_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='job')
+_executor = ThreadPoolExecutor(max_workers=config.MAX_CONCURRENT_JOBS, thread_name_prefix='job')
+
+
+class JobRejected(Exception):
+    """Raised when a job can't be accepted; `status` is the HTTP code to answer with."""
+
+    def __init__(self, message: str, status: int = 409):
+        super().__init__(message)
+        self.status = status
 _marked_stale = False
 _lock = threading.Lock()
 
@@ -44,8 +52,22 @@ def _update(job_id: str, **values) -> None:
         c.execute(sa.update(db.jobs_t).where(db.jobs_t.c.id == job_id).values(**values))
 
 
+def _admit(ws: str) -> None:
+    """Fairness and back-pressure: one job per workspace, a bounded global queue, old rows cleaned up."""
+    j = db.jobs_t
+    with db.get_engine().begin() as c:
+        c.execute(sa.delete(j).where(j.c.status.in_(['done', 'error']), j.c.finished_at < time.time() - config.JOB_RETENTION_DAYS * 86400))
+        mine = c.execute(sa.select(sa.func.count()).where(j.c.workspace_id == ws, j.c.status.in_(['queued', 'running']))).scalar()
+        queued = c.execute(sa.select(sa.func.count()).where(j.c.status == 'queued')).scalar()
+    if mine:
+        raise JobRejected('You already have a training or scoring job in progress. Wait for it to finish.', 409)
+    if queued >= config.MAX_QUEUED_JOBS:
+        raise JobRejected('The server is busy training other models. Please try again in a few minutes.', 503)
+
+
 def submit(ws: str, kind: str, fn: Callable[[Callable[[str, int], None]], dict]) -> str:
     _mark_stale_once()
+    _admit(ws)
     job_id = db.new_id()
     with db.get_engine().begin() as c:
         c.execute(db.jobs_t.insert().values(id=job_id, workspace_id=ws, kind=kind, status='queued', progress=0,
@@ -80,4 +102,8 @@ def get(ws: str, job_id: str) -> dict | None:
         return None
     d = dict(r._mapping)
     d['result'] = db.loads(d.get('result'))
+    if d['status'] == 'queued':          # tell people where they are in line
+        with db.get_engine().connect() as c:
+            ahead = c.execute(sa.select(sa.func.count()).where(db.jobs_t.c.status == 'queued', db.jobs_t.c.created_at < d['created_at'])).scalar()
+        d['stage'] = f'Queued · {ahead + 1} in line'
     return d

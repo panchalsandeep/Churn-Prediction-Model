@@ -26,6 +26,7 @@ import firebase_admin  # noqa: E402
 from firebase_admin import auth  # noqa: E402
 
 from churn import config, db, jobs, registry, service  # noqa: E402
+from churn.jobs import JobRejected  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
 from churn.security import SECURITY_HEADERS, limiter  # noqa: E402
@@ -184,6 +185,15 @@ def _finish(response):
     return response
 
 
+@app.errorhandler(JobRejected)
+def _job_rejected(exc):
+    resp = jsonify({'error': str(exc)})
+    resp.status_code = exc.status
+    if exc.status == 503:
+        resp.headers['Retry-After'] = '60'
+    return resp
+
+
 @app.errorhandler(413)
 def _too_large(_):
     return jsonify({'error': f'File too large. Maximum upload is {config.MAX_UPLOAD_MB} MB.'}), 413
@@ -200,12 +210,15 @@ def _unhandled(exc):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def read_upload() -> pd.DataFrame:
+def read_upload(sample: bool = False) -> pd.DataFrame:
+    """Parse the uploaded CSV. With sample=True the client sent only the head of a large file: drop the cut-off last line."""
     if 'file' not in request.files:
         raise ValueError('No file provided')
     raw = request.files['file'].read()
     if not raw.strip():
         raise ValueError('The file is empty')
+    if sample and raw.count(b'\n') > 1:
+        raw = raw[:raw.rfind(b'\n')]
     for encoding in ('utf-8-sig', 'latin-1'):
         try:
             df = pd.read_csv(io.BytesIO(raw), encoding=encoding, nrows=config.MAX_ROWS + 1, low_memory=False)
@@ -321,13 +334,22 @@ def prometheus_metrics():
 @require_firebase_auth
 def preview():
     """Show how a CSV will be interpreted before training (the upload wizard)."""
+    truncated = request.form.get('truncated') == '1'
     try:
-        df = read_upload()
+        df = read_upload(sample=truncated)
         schema = infer_schema(df, request.form.get('target') or None)
     except ValueError as exc:
         return bad_request(str(exc))
+    rows = int(len(df))
+    if truncated:                                   # extrapolate the row count from how much of the file we saw
+        try:
+            total, seen = float(request.form['total_bytes']), float(request.form['sent_bytes'])
+            rows = int(len(df) * total / max(seen, 1))
+        except (KeyError, ValueError):
+            pass
+    schema['rows'] = rows
     sample = json.loads(df.head(5).to_json(orient='records', date_format='iso'))
-    return jsonify({'schema': schema, 'sample': sample, 'columns': list(df.columns), 'rows': int(len(df))})
+    return jsonify({'schema': schema, 'sample': sample, 'columns': list(df.columns), 'rows': rows, 'estimated': truncated})
 
 
 @app.route('/api/upload', methods=['POST'])
@@ -381,10 +403,21 @@ def job_status(job_id):
 @app.route('/api/results', methods=['GET'])
 @require_firebase_auth
 def get_results():
-    results = service.build_results(g.ws)
-    if results is None:
+    packed = service.results_bytes(g.ws)
+    if packed is None:
         return bad_request('No model yet. Upload data or load the demo dataset.', 404)
-    return jsonify(results)
+    etag, raw, gz = packed
+    if request.headers.get('If-None-Match', '').strip('"') == etag:
+        resp = Response(status=304)
+    elif 'gzip' in request.headers.get('Accept-Encoding', ''):
+        resp = Response(gz, mimetype='application/json')
+        resp.headers['Content-Encoding'] = 'gzip'
+    else:
+        resp = Response(raw, mimetype='application/json')
+    resp.headers['ETag'] = f'"{etag}"'
+    resp.headers['Cache-Control'] = 'private, no-cache'
+    resp.headers['Vary'] = 'Accept-Encoding'
+    return resp
 
 
 @app.route('/api/customers', methods=['GET'])
@@ -394,8 +427,8 @@ def get_customers():
     try:
         res = service.query_customers(g.ws, a.get('tier'), a.get('q'), a.get('sort', 'prob'), 'asc' if a.get('dir') == 'asc' else 'desc',
                                       int(a.get('page', 1)), int(a.get('limit', 20)))
-    except ValueError:
-        return bad_request('Invalid paging parameters')
+    except ValueError as exc:
+        return bad_request(str(exc) if 'Pages beyond' in str(exc) else 'Invalid paging parameters')
     return jsonify(res)
 
 
