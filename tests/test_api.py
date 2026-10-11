@@ -162,7 +162,7 @@ def test_retrain_creates_second_version_and_rollback_restores_scores(trained, cl
 
 def test_workspaces_are_isolated(client, env, monkeypatch):
     import index
-    monkeypatch.setattr(index, 'workspace_for', lambda user: 'other_tenant')
+    monkeypatch.setattr(index, 'resolve_context', lambda user: {'ws': 'other_tenant', 'role': 'owner', 'uid': 'x', 'email': 'x', 'sso_required': False})
     assert client.get('/api/results').status_code == 404            # the other tenant has no model
     assert client.get('/api/customers').get_json()['total'] == 0
     assert client.get('/api/models').get_json()['models'] == []

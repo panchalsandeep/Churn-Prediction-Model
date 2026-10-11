@@ -8,10 +8,9 @@ import threading
 import time
 from collections import OrderedDict
 
-import joblib
 import sqlalchemy as sa
 
-from . import config, db
+from . import artifacts, config, crypto, db
 KEEP_MODELS = config.KEEP_MODELS
 
 _cache: OrderedDict[tuple[str, str], dict] = OrderedDict()
@@ -30,8 +29,10 @@ def model_dir(ws: str, model_id: str) -> str:
 
 
 def save_bundle(ws: str, model_id: str, bundle: dict) -> str:
-    path = os.path.join(model_dir(ws, model_id), 'model.joblib')
-    joblib.dump(bundle, path, compress=3)
+    """Safe (non-pickle) format, encrypted with the workspace key and bound to this workspace and model id."""
+    path = os.path.join(model_dir(ws, model_id), 'model.cse')
+    with open(path, 'wb') as f:
+        f.write(crypto.encrypt_bytes(ws, artifacts.dumps_bundle(bundle), f'model|{model_id}'))
     return path
 
 
@@ -44,7 +45,10 @@ def load_bundle(ws: str, model_id: str) -> dict | None:
     row = get_model(ws, model_id)
     if not row or not row['artifact_path'] or not os.path.exists(row['artifact_path']):
         return None
-    bundle = joblib.load(row['artifact_path'])
+    if not row['artifact_path'].endswith('.cse'):
+        raise artifacts.ArtifactError('This model uses the legacy pickle format, which is no longer loaded. Retrain it.')
+    with open(row['artifact_path'], 'rb') as f:
+        bundle = artifacts.loads_bundle(crypto.decrypt_bytes(ws, f.read(), f'model|{model_id}'))
     with _cache_lock:
         _cache[key] = bundle
         while len(_cache) > CACHE_SIZE:

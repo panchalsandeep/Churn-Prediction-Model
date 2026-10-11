@@ -25,7 +25,10 @@ from flask_cors import CORS  # noqa: E402
 import firebase_admin  # noqa: E402
 from firebase_admin import auth  # noqa: E402
 
-from churn import config, db, jobs, registry, service  # noqa: E402
+from churn import config, db, jobs, privacy, registry, service, tenancy  # noqa: E402
+from churn.tenancy import TenancyError  # noqa: E402
+from churn.artifacts import ArtifactError  # noqa: E402
+from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
 from churn.jobs import JobRejected  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
@@ -43,11 +46,8 @@ app.config['MAX_CONTENT_LENGTH'] = config.MAX_UPLOAD_MB * 1024 * 1024
 
 
 def is_production() -> bool:
-    return (
-        os.environ.get('VERCEL') == '1'
-        or os.environ.get('FLASK_ENV') == 'production'
-        or os.environ.get('AUTH_FAIL_CLOSED', '').lower() in ('1', 'true', 'yes')
-    )
+    return (config.PRODUCTION or os.environ.get('FLASK_ENV') == 'production'
+            or os.environ.get('AUTH_FAIL_CLOSED', '').lower() in ('1', 'true', 'yes'))
 
 
 _origins = [o.strip() for o in os.environ.get('CORS_ORIGINS', '').split(',') if o.strip()]
@@ -78,15 +78,41 @@ def is_admin_token(decoded_token) -> bool:
     return (decoded_token.get('email') or '').lower() in ADMIN_EMAILS or decoded_token.get('admin') is True
 
 
-def workspace_for(user) -> str:
-    mode = config.WORKSPACE_MODE
-    if not user:
-        return 'local'
-    if mode == 'shared':
-        return 'shared'
-    if mode == 'domain' and user.get('email') and not user['email'].lower().endswith(('@gmail.com', '@outlook.com', '@yahoo.com', '@hotmail.com')):
-        return 'd_' + user['email'].split('@', 1)[1].lower()
-    return 'u_' + str(user.get('uid') or user.get('user_id') or 'unknown')
+AUTO_PROVISION = os.environ.get('AUTO_PROVISION', '0' if config.PRODUCTION else '1').lower() in ('1', 'true', 'yes')
+
+
+def _mfa_roles() -> set[str]:
+    default = 'admin,owner' if (config.PRODUCTION or is_production()) else ''
+    return {r.strip() for r in os.environ.get('REQUIRE_MFA_ROLES', default).split(',') if r.strip()}
+
+
+def resolve_context(user) -> dict:
+    """Who is calling, in which workspace, with which role. Raises TenancyError (with a code the UI understands) if not allowed."""
+    if not user:                                   # local development without Firebase
+        return {'ws': 'local', 'role': 'owner', 'uid': 'local-dev', 'email': 'local-dev', 'sso_required': False}
+    uid = str(user.get('uid') or user.get('user_id') or '')
+    email = (user.get('email') or '').lower()
+    memberships = tenancy.memberships_for(uid)
+    requested = request.headers.get('X-Workspace')
+    if requested:
+        chosen = next((m for m in memberships if m['workspace_id'] == requested), None)
+        if not chosen:
+            raise TenancyError('You do not belong to that workspace.', 403, 'forbidden_workspace')
+    elif memberships:
+        chosen = memberships[0]
+    elif AUTO_PROVISION or is_admin_token(user):
+        tenancy.personal_workspace(uid, email)
+        chosen = tenancy.memberships_for(uid)[0]
+    else:
+        raise TenancyError('This account has no workspace yet. Ask an administrator to invite you.', 403, 'no_workspace')
+
+    firebase_claims = user.get('firebase') or {}
+    provider = firebase_claims.get('sign_in_provider', '') or ''
+    if chosen['sso_required'] and not provider.startswith(('saml.', 'oidc.')):
+        raise TenancyError('This workspace requires single sign-on.', 403, 'sso_required')
+    if chosen['role'] in _mfa_roles() and not firebase_claims.get('sign_in_second_factor'):
+        raise TenancyError('Multi-factor authentication is required for your role.', 403, 'mfa_required')
+    return {'ws': chosen['workspace_id'], 'role': chosen['role'], 'uid': uid, 'email': email, 'sso_required': bool(chosen['sso_required'])}
 
 
 def _client_key() -> str:
@@ -94,8 +120,11 @@ def _client_key() -> str:
     return (user or {}).get('uid') or request.headers.get('X-Forwarded-For', request.remote_addr or 'anon').split(',')[0].strip()
 
 
-def require_firebase_auth(f=None, *, heavy: bool = False):
-    """Authenticate, bind the workspace, and rate-limit. `heavy` is for training/scoring endpoints."""
+def require_firebase_auth(f=None, *, heavy: bool = False, role: str = 'viewer', no_workspace: bool = False):
+    """Authenticate, resolve the workspace and role, enforce the minimum role, and rate-limit.
+
+    `heavy` is for training/scoring endpoints. `no_workspace` is for calls a user makes before they belong to one (accepting an invite).
+    """
     def wrap(fn):
         @wraps(fn)
         def decorated(*args, **kwargs):
@@ -122,16 +151,35 @@ def require_firebase_auth(f=None, *, heavy: bool = False):
                 resp.headers['Retry-After'] = str(retry)
                 return resp
 
-            g.ws = workspace_for(request.user)
-            g.actor = (request.user or {}).get('email') or 'local-dev'
+            user = request.user or {}
+            if no_workspace:
+                g.ws, g.role, g.uid = None, None, str(user.get('uid') or 'local-dev')
+                g.email, g.actor = (user.get('email') or '').lower(), user.get('email') or 'local-dev'
+            else:
+                with db.system_context():
+                    ctx = resolve_context(request.user)
+                if not tenancy.has_role(ctx['role'], role):
+                    resp = jsonify({'error': f'This action needs the {role} role (you are {ctx["role"]}).', 'code': 'forbidden_role'})
+                    resp.status_code = 403
+                    return resp
+                g.ws, g.role, g.uid, g.email = ctx['ws'], ctx['role'], ctx['uid'], ctx['email']
+                g.actor = user.get('email') or 'local-dev'
+                db.workspace_context.set(g.ws)       # row-level security scope for everything this request does
             return fn(*args, **kwargs)
         return decorated
     return wrap(f) if f else wrap
 
 
+def ensure_role(minimum: str) -> None:
+    """For endpoints whose required role depends on the HTTP method."""
+    if not tenancy.has_role(g.role, minimum):
+        raise TenancyError(f'This action needs the {minimum} role (you are {g.role}).', 403, 'forbidden_role')
+
+
 def require_admin(f):
+    """Platform administrators (ADMIN_EMAILS / admin claim): Firebase user management and workspace provisioning."""
     @wraps(f)
-    @require_firebase_auth
+    @require_firebase_auth(no_workspace=True)
     def decorated(*args, **kwargs):
         if not auth_configured():
             return f(*args, **kwargs)           # local dev without Firebase
@@ -185,6 +233,16 @@ def _finish(response):
     return response
 
 
+@app.teardown_request
+def _clear_tenant_context(_exc):
+    db.workspace_context.set('')          # a pooled thread must never carry one request's tenant into the next
+
+
+@app.errorhandler(TenancyError)
+def _tenancy_error(exc):
+    return jsonify({'error': str(exc), 'code': exc.code}), exc.status
+
+
 @app.errorhandler(JobRejected)
 def _job_rejected(exc):
     resp = jsonify({'error': str(exc)})
@@ -192,6 +250,16 @@ def _job_rejected(exc):
     if exc.status == 503:
         resp.headers['Retry-After'] = '60'
     return resp
+
+
+@app.errorhandler(ArtifactError)
+def _artifact_error(exc):
+    return jsonify({'error': str(exc), 'code': 'model_unavailable'}), 409
+
+
+@app.errorhandler(KeyShredded)
+def _key_shredded(exc):
+    return jsonify({'error': 'This workspace\'s data was deleted.', 'code': 'workspace_deleted'}), 410
 
 
 @app.errorhandler(413)
@@ -251,6 +319,10 @@ def job_response(job_id: str):
     j = jobs.get(g.ws, job_id)
     finished = bool(j and j['status'] in ('done', 'error'))
     return jsonify({'job_id': job_id, 'job': j}), (200 if finished else 202)
+
+
+def form_list(name: str) -> list[str]:
+    return [c.strip() for c in request.form.get(name, '').split(',') if c.strip()]
 
 
 def parse_algorithm() -> str:
@@ -331,13 +403,13 @@ def prometheus_metrics():
 # ── Training / scoring jobs ───────────────────────────────────────────────────
 
 @app.route('/api/preview', methods=['POST'])
-@require_firebase_auth
+@require_firebase_auth(role='admin')
 def preview():
     """Show how a CSV will be interpreted before training (the upload wizard)."""
     truncated = request.form.get('truncated') == '1'
     try:
         df = read_upload(sample=truncated)
-        schema = infer_schema(df, request.form.get('target') or None)
+        schema = infer_schema(df, request.form.get('target') or None, form_list('exclude_columns'), form_list('allow_pii'))
     except ValueError as exc:
         return bad_request(str(exc))
     rows = int(len(df))
@@ -348,25 +420,28 @@ def preview():
         except (KeyError, ValueError):
             pass
     schema['rows'] = rows
-    sample = json.loads(df.head(5).to_json(orient='records', date_format='iso'))
+    pii = set(schema.get('pii', []))
+    sample = json.loads(df.drop(columns=[c for c in df.columns if c in pii]).head(5).to_json(orient='records', date_format='iso'))
     return jsonify({'schema': schema, 'sample': sample, 'columns': list(df.columns), 'rows': rows, 'estimated': truncated})
 
 
 @app.route('/api/upload', methods=['POST'])
-@require_firebase_auth(heavy=True)
+@require_firebase_auth(heavy=True, role='admin')
 def upload_file():
     try:
         df = read_upload()
     except ValueError as exc:
         return bad_request(str(exc))
     algorithm, promote, target = parse_algorithm(), parse_promote(), request.form.get('target') or None
+    exclude, allow_pii = form_list('exclude_columns'), form_list('allow_pii')
     ws, actor = g.ws, g.actor
-    job_id = jobs.submit(ws, 'train', lambda progress: service.run_training(ws, df, algorithm, actor, progress, promote, 'upload', target))
+    job_id = jobs.submit(ws, 'train', lambda progress: service.run_training(ws, df, algorithm, actor, progress, promote, 'upload', target,
+                                                                           exclude, allow_pii))
     return job_response(job_id)
 
 
 @app.route('/api/demo', methods=['POST'])
-@require_firebase_auth(heavy=True)
+@require_firebase_auth(heavy=True, role='admin')
 def load_demo():
     body = request.get_json(silent=True) or {}
     try:
@@ -380,14 +455,15 @@ def load_demo():
 
 
 @app.route('/api/score', methods=['POST'])
-@require_firebase_auth(heavy=True)
+@require_firebase_auth(heavy=True, role='admin')
 def score_batch():
     try:
         df = read_upload()
     except ValueError as exc:
         return bad_request(str(exc))
     ws, actor = g.ws, g.actor
-    job_id = jobs.submit(ws, 'score', lambda progress: service.run_batch_scoring(ws, df, actor, progress))
+    allow_missing = request.form.get('allow_missing', '').lower() in ('1', 'true', 'yes')
+    job_id = jobs.submit(ws, 'score', lambda progress: service.run_batch_scoring(ws, df, actor, progress, allow_missing))
     return job_response(job_id)
 
 
@@ -433,7 +509,7 @@ def get_customers():
 
 
 @app.route('/api/customers/export', methods=['GET', 'POST'])
-@require_firebase_auth
+@require_firebase_auth(role='analyst')
 def export_customers():
     a = request.args
     ids = (request.get_json(silent=True) or {}).get('ids') if request.method == 'POST' else None
@@ -491,7 +567,7 @@ def models_list():
 
 
 @app.route('/api/models/<model_id>/promote', methods=['POST'])
-@require_firebase_auth(heavy=True)
+@require_firebase_auth(heavy=True, role='admin')
 def models_promote(model_id):
     try:
         return jsonify(service.promote_model(g.ws, model_id, g.actor))
@@ -508,6 +584,8 @@ def drift():
 @app.route('/api/settings', methods=['GET', 'POST'])
 @require_firebase_auth
 def settings():
+    if request.method == 'POST':
+        ensure_role('admin')
     if request.method == 'GET':
         row, bundle = registry.champion_bundle(g.ws)
         current = service.get_settings(g.ws)
@@ -526,7 +604,7 @@ def settings():
 
 
 @app.route('/api/workspace/reset', methods=['POST'])
-@require_firebase_auth
+@require_firebase_auth(role='owner')
 def workspace_reset():
     registry.wipe(g.ws)
     db.audit(g.ws, g.actor, 'workspace.reset')
@@ -544,7 +622,7 @@ def alerts_list():
 
 
 @app.route('/api/alerts/<alert_id>', methods=['PATCH'])
-@require_firebase_auth
+@require_firebase_auth(role='analyst')
 def alerts_update(alert_id):
     body = request.get_json(silent=True) or {}
     if body.get('assignee') == '@me':
@@ -557,7 +635,7 @@ def alerts_update(alert_id):
 
 
 @app.route('/api/customers/<path:customer_id>/interventions', methods=['POST'])
-@require_firebase_auth
+@require_firebase_auth(role='analyst')
 def interventions_add(customer_id):
     body = request.get_json(silent=True) or {}
     try:
@@ -567,7 +645,7 @@ def interventions_add(customer_id):
 
 
 @app.route('/api/interventions/<intervention_id>', methods=['PATCH'])
-@require_firebase_auth
+@require_firebase_auth(role='analyst')
 def interventions_outcome(intervention_id):
     try:
         ok = service.set_outcome(g.ws, intervention_id, (request.get_json(silent=True) or {}).get('outcome', ''), g.actor)
@@ -625,13 +703,120 @@ def admin_update_user(uid):
     return jsonify({'status': 'success', 'action': action})
 
 
-@app.route('/api/admin/audit', methods=['GET'])
+@app.route('/api/me', methods=['GET'])
+@require_firebase_auth
+def me():
+    info = tenancy.get_workspace(g.ws) or {'id': g.ws, 'name': g.ws, 'plan': 'dev'}
+    return jsonify({'uid': g.uid, 'email': g.email, 'role': g.role,
+                    'workspace': {'id': info['id'], 'name': info['name'], 'plan': info.get('plan'), 'sso_required': bool(info.get('sso_required'))},
+                    'workspaces': [{'id': m['workspace_id'], 'name': m['name'], 'role': m['role']} for m in tenancy.memberships_for(g.uid)] if g.uid != 'local-dev' else [],
+                    'seats': tenancy.seat_count(g.ws), 'platform_admin': bool(request.user and is_admin_token(request.user))})
+
+
+@app.route('/api/members', methods=['GET'])
+@require_firebase_auth(role='admin')
+def members_list():
+    return jsonify({'members': tenancy.list_members(g.ws), 'seats': tenancy.seat_count(g.ws)})
+
+
+@app.route('/api/members/<uid>', methods=['PATCH', 'DELETE'])
+@require_firebase_auth(role='admin')
+def members_update(uid):
+    if request.method == 'PATCH':
+        tenancy.set_role(g.ws, g.uid, g.role, g.actor, uid, (request.get_json(silent=True) or {}).get('role', ''))
+    else:
+        tenancy.remove_member(g.ws, g.uid, g.role, g.actor, uid)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/invites', methods=['POST'])
+@require_firebase_auth(role='admin')
+def invites_create():
+    body = request.get_json(silent=True) or {}
+    invite = tenancy.create_invite(g.ws, body.get('email', ''), body.get('role', 'viewer'), g.role, g.actor)
+    return jsonify(invite), 201          # the token is shown once; only its hash is stored
+
+
+@app.route('/api/invites/accept', methods=['POST'])
+@require_firebase_auth(no_workspace=True)
+def invites_accept():
+    return jsonify(tenancy.accept_invite((request.get_json(silent=True) or {}).get('token', ''), g.uid, g.email))
+
+
+@app.route('/api/workspaces', methods=['POST'])
 @require_admin
-def admin_audit():
+def workspaces_create():
+    """Platform administrators provision a customer workspace and get a one-time owner invitation."""
+    body = request.get_json(silent=True) or {}
+    name = (body.get('name') or '').strip()
+    if not name or '@' not in (body.get('owner_email') or ''):
+        return bad_request('A workspace name and the owner\'s email are required.')
+    ws = tenancy.create_workspace(name)
+    with db.workspace_scope(ws):
+        invite = tenancy.create_invite(ws, body['owner_email'], 'owner', 'owner', getattr(g, 'actor', None))
+    return jsonify({'workspace_id': ws, 'invite': invite}), 201
+
+
+@app.route('/api/workspace/sso', methods=['POST'])
+@require_firebase_auth(role='owner')
+def workspace_sso():
+    tenancy.set_sso_required(g.ws, bool((request.get_json(silent=True) or {}).get('required')), g.actor)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/audit', methods=['GET'])
+@require_firebase_auth(role='admin')
+def audit_list():
     import sqlalchemy as sa
     with db.get_engine().connect() as c:
-        rows = c.execute(sa.select(db.audit_t).where(db.audit_t.c.workspace_id == g.ws).order_by(db.audit_t.c.id.desc()).limit(100)).all()
-    return jsonify({'events': [{'actor': r.actor, 'action': r.action, 'detail': db.loads(r.detail), 'ts': r.ts} for r in rows]})
+        rows = c.execute(sa.select(db.audit_t).where(db.audit_t.c.workspace_id == g.ws).order_by(db.audit_t.c.id.desc()).limit(200)).all()
+    return jsonify({'events': [{'id': r.id, 'actor': r.actor, 'action': r.action, 'detail': db.loads(r.detail), 'ts': r.ts} for r in rows],
+                    'chain': db.verify_audit(g.ws)})
+
+
+@app.route('/api/audit/export', methods=['GET'])
+@require_firebase_auth(role='admin')
+def audit_export():
+    import sqlalchemy as sa
+    with db.get_engine().connect() as c:
+        rows = c.execute(sa.select(db.audit_t).where(db.audit_t.c.workspace_id == g.ws).order_by(db.audit_t.c.id)).all()
+    lines = [json.dumps({'id': r.id, 'ts': r.ts, 'actor': r.actor, 'action': r.action, 'detail': db.loads(r.detail), 'prev_hash': r.prev_hash, 'hash': r.hash})
+             for r in rows]
+    return Response('\n'.join(lines) + '\n', mimetype='application/x-ndjson',
+                    headers={'Content-Disposition': f'attachment; filename=audit-{g.ws}.ndjson'})
+
+
+@app.route('/api/privacy/erase', methods=['POST'])
+@require_firebase_auth(role='admin')
+def privacy_erase():
+    ids = (request.get_json(silent=True) or {}).get('ids') or []
+    if not isinstance(ids, list) or not ids:
+        return bad_request('Provide a non-empty list of customer ids.')
+    return jsonify(privacy.erase_customers(g.ws, ids, g.actor))
+
+
+@app.route('/api/privacy/export/<path:customer_id>', methods=['GET'])
+@require_firebase_auth(role='admin')
+def privacy_export(customer_id):
+    data = privacy.export_customer(g.ws, customer_id, g.actor)
+    return jsonify(data) if data else bad_request('Customer not found', 404)
+
+
+@app.route('/api/privacy/lookup', methods=['POST'])
+@require_firebase_auth(role='admin')
+def privacy_lookup():
+    """With ID pseudonymisation on, map your own customer ids to the stored stand-ins so you can search for them."""
+    from churn import crypto
+    ids = (request.get_json(silent=True) or {}).get('ids') or []
+    return jsonify({'ids': {str(i): crypto.pseudonymize_id(g.ws, i) for i in ids[:1000]}})
+
+
+@app.route('/api/workspace', methods=['DELETE'])
+@require_firebase_auth(role='owner')
+def workspace_delete():
+    if (request.get_json(silent=True) or {}).get('confirm') != g.ws:
+        return bad_request('To delete this workspace, send {"confirm": "<workspace id>"}. This cannot be undone.')
+    return jsonify(privacy.delete_workspace(g.ws, g.actor))
 
 
 if __name__ == '__main__':

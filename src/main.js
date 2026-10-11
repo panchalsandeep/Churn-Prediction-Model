@@ -7,8 +7,8 @@ import { loadFirebase } from './lib/firebase.js';
 import { initTheme, toggleTheme } from './lib/theme.js';
 import { initPalette } from './lib/palette.js';
 import { debounce, replay, prefersReducedMotion } from './lib/motion.js';
-import { $, qs, qsa, state, escapeHtml, showToast, emit, fmtPct } from './lib/ctx.js';
-import { get } from './lib/api.js';
+import { $, qs, qsa, state, escapeHtml, showToast, emit, fmtPct, can } from './lib/ctx.js';
+import { get, post, ApiError } from './lib/api.js';
 import { renderSectionCharts, markAllDirty, destroyAll, rebuildOnThemeChange } from './lib/chartkit.js';
 
 import { initUpload } from './views/upload.js';
@@ -142,6 +142,54 @@ function updateModelStatus(model) {
   if (model) { badge.textContent = model.algorithm; replay(badge, 'pop-in'); }
 }
 
+/* ══════════════════  IDENTITY, ROLES, ACCESS GATE  ═════════════════ */
+const GATES = {
+  mfa_required: ['Multi-factor authentication required', 'Your role needs a second sign-in factor. Enrol one in your account security settings, sign in again, and complete the prompt.'],
+  sso_required: ['Single sign-on required', 'This workspace only allows sign-in through your company identity provider. Use your organisation\'s SSO sign-in link.'],
+  no_workspace: ['No workspace yet', 'This account is not part of a workspace. Paste the invitation code your administrator sent you, or ask them to invite you.'],
+  forbidden_workspace: ['Workspace not available', 'You do not have access to that workspace.'],
+};
+
+function showGate(code, fallback) {
+  const [title, text] = GATES[code] || ['Access needed', fallback || 'Access is not available for this account.'];
+  $('gate-title').textContent = title;
+  $('gate-text').textContent = text;
+  $('gate-invite').hidden = code !== 'no_workspace';
+  $('access-gate').hidden = false;
+  $('access-gate').style.display = 'flex';
+  document.body.classList.add('app-locked');
+}
+
+function applyRole() {
+  document.body.dataset.role = state.me.role;
+  qsa('[data-min-role]').forEach(el => { el.hidden = !can(el.dataset.minRole); });
+  $('upload-denied').hidden = can('admin');
+  $('workspace-badge').textContent = state.me.role;
+}
+
+/** Who am I and what may I do? Returns false (and shows the gate) when access is not allowed yet. */
+async function loadMe() {
+  try {
+    state.me = await get('/me');
+    state.workspaceId = state.me.workspace.id;
+    applyRole();
+    emit('me', state.me);
+    return true;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 403 && err.code) { showGate(err.code, err.message); return false; }
+    console.warn('Could not load identity:', err);
+    return true;       // do not lock people out because of a network blip
+  }
+}
+
+async function acceptInviteFromUrl() {
+  const token = new URLSearchParams(location.search).get('invite');
+  if (!token) return;
+  history.replaceState({}, '', location.pathname);
+  try { await post('/invites/accept', { token }); showToast('Invitation accepted. Welcome to the workspace!'); }
+  catch (err) { showToast(err.message, 'error'); }
+}
+
 function applyResults(results) {
   state.results = results;
   updateModelStatus(results?.model);
@@ -161,6 +209,11 @@ async function reloadResults() {
     return true;
   } catch (err) {
     if (err.status === 404) { applyResults(null); return false; }
+    if (err.code === 'model_unavailable') {      // e.g. a model saved in the old, unsafe pickle format
+      applyResults(null);
+      showToast(err.message, 'error');
+      return false;
+    }
     console.warn('Unable to load results:', err);
     return false;
   }
@@ -309,17 +362,27 @@ async function initAuthUI() {
       hideAuthOverlay();
       showToast(`Welcome back, ${user.displayName || user.email}!`);
       await refreshAdminAccess();
-      await reloadResults();
+      await acceptInviteFromUrl();
+      if (await loadMe()) { $('access-gate').hidden = true; await reloadResults(); }
     } else {
       state.user = null;
       state.admin.isAdmin = false;
       $('user-profile-section').style.display = 'none';
       try { localStorage.removeItem(SESSION_HINT); } catch { /* ignore */ }
       showAuthOverlay();
-      await reloadResults();
+      if (await loadMe()) await reloadResults();
     }
   });
 }
+
+$('gate-signout').addEventListener('click', () => (fb ? handleSignOut() : location.reload()));
+$('gate-invite').addEventListener('submit', async e => {
+  e.preventDefault();
+  try {
+    await post('/invites/accept', { token: $('gate-token').value.trim() });
+    location.reload();
+  } catch (err) { showToast(err.message, 'error'); }
+});
 
 /* ══════════════════  COMMAND PALETTE  ═════════════════════ */
 initTheme();

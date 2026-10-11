@@ -23,6 +23,18 @@ Flask API  (api/index.py)  ── auth → workspace → rate limit → handler
 * **Closed loop.** Alerts and logged interventions (action, outcome) are persisted. They are the labelled treatment data that a future uplift model needs.
 * **Security.** Fail-closed auth in production, per-user rate limits (stricter for training), upload size/row caps, CSV formula-injection neutralised on export, security headers, request ids and structured logs, optional `/metrics`.
 
+## Security architecture
+
+* **Identity and roles.** Firebase proves who you are (password, SAML/OIDC SSO, MFA). *We* decide what you may do: workspaces, memberships and four roles (`viewer < analyst < admin < owner`) live in our database and are enforced per route. Invitations are single-use, expiring, hashed at rest and bound to the invited email. SSO and MFA can be required per workspace and per role.
+* **Tenant isolation, three layers.** (1) The workspace comes from the verified token plus membership, never from a client-supplied id. (2) Every query is scoped. (3) On PostgreSQL, forced row-level security with a fail-closed default backs both up; the tenant is set per transaction from a context variable that is cleared after every request. Cross-tenant operations run in an explicit `system_context`.
+* **Encryption.** Each workspace has its own data key, wrapped by a master key (environment or KMS). Model artifacts and scored snapshots are always encrypted; customer attributes and explanations are encrypted per field in production. Ciphertext is bound to its workspace and context, so swapping blobs fails. Deleting a workspace destroys its key (crypto-shredding), which makes every surviving copy unreadable.
+* **No pickles.** Models are serialised with `skops` and every referenced type is checked against an allow-list before anything is built; libraries are version-stamped and incompatible versions are refused.
+* **Tamper-evident audit.** Hash-chained, append-only (database triggers), verifiable, exportable.
+* **Privacy by default.** Personal-data columns are detected and neither modelled nor stored; IDs can be pseudonymised; erasure and subject-access export are built in.
+* **Schema discipline.** Alembic migrations, a drift test between models and migrations, and automatic adoption of pre-migration databases.
+
+See [THREAT_MODEL.md](THREAT_MODEL.md) for the threats, the tests that cover each, and what remains unproven.
+
 ## Model
 
 | Decision | Why |

@@ -2466,3 +2466,37 @@ html.returning #auth-overlay .auth-card { display: none; }
 .trait-dir.high { color: var(--red); }
 .trait-dir.low { color: var(--blue); }
 .trait-dir.cat { color: var(--gold); }
+
+/* Phase 0: team, privacy, roles, access gate */
+.invite-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.invite-form input, .invite-form select, .role-select, .privacy-form textarea, .privacy-form input, .exclude-row input {
+  padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-1); font: inherit; font-size: 0.82rem;
+}
+.invite-form input { min-width: 220px; }
+.invite-result { margin: 0 24px 16px; padding: 14px 16px; border-radius: 12px; background: var(--accent-soft); border: 1px solid var(--accent-ring); font-size: 0.84rem; }
+.invite-result p { margin: 4px 0 10px; color: var(--text-2); }
+.invite-link { display: flex; gap: 8px; align-items: center; }
+.invite-link code { flex: 1; overflow-x: auto; white-space: nowrap; padding: 8px 10px; border-radius: 8px; background: var(--input-bg); font-size: 0.74rem; }
+.sso-row { padding: 14px 24px 18px; border-top: 1px solid var(--border); font-size: 0.84rem; color: var(--text-2); }
+.sso-row label { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.privacy-form { display: grid; gap: 8px; margin-top: 18px; }
+.privacy-form label { font-size: 0.8rem; font-weight: 600; color: var(--text-2); }
+.privacy-form textarea { resize: vertical; width: 100%; }
+.inline-row { display: flex; gap: 8px; }
+.inline-row input { flex: 1; }
+.danger-zone { margin-top: 22px; padding: 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--red) 40%, transparent); background: color-mix(in srgb, var(--red) 6%, transparent); }
+.danger-zone h4 { color: var(--red); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+.danger-zone p { font-size: 0.8rem; color: var(--text-2); margin-bottom: 10px; }
+.pii-box { margin-top: 12px; padding: 12px; border-radius: 10px; border: 1px solid color-mix(in srgb, var(--orange) 45%, transparent); background: color-mix(in srgb, var(--orange) 8%, transparent); font-size: 0.8rem; color: var(--text-2); }
+.pii-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; cursor: pointer; }
+.exclude-row { margin: 0 0 16px; }
+.exclude-row label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.exclude-row input { width: 100%; }
+.upload-denied { margin-bottom: 22px; }
+.upload-denied p { color: var(--text-2); line-height: 1.55; }
+.gate-card { text-align: center; }
+.gate-card .auth-subtitle { margin-bottom: 18px; }
+.gate-invite { display: grid; gap: 10px; margin-bottom: 12px; }
+.gate-invite input { padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-1); }
+#access-gate { z-index: 10001; display: none; }
+#access-gate:not([hidden]) { display: flex; }

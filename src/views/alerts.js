@@ -1,5 +1,5 @@
 /* Alerts: persisted workflow (Open → Acknowledged → Resolved) and closed-loop intervention results. */
-import { $, qsa, state, escapeHtml, fmtMoney, fmtInt, showToast, on, timeAgo } from '../lib/ctx.js';
+import { $, qsa, state, escapeHtml, fmtMoney, fmtInt, showToast, on, timeAgo, can } from '../lib/ctx.js';
 import { get, patch } from '../lib/api.js';
 import { prefersReducedMotion } from '../lib/motion.js';
 import { openCustomer } from './drawer.js';
@@ -33,7 +33,7 @@ function render(items) {
       <p>${escapeHtml(a.details || '')}</p>
       <div class="alert-badges">${(a.signals || []).map(s => `<span class="alert-badge sig">${escapeHtml(s)}</span>`).join('')}
         ${a.assignee ? `<span class="alert-badge assignee">Assigned: ${escapeHtml(a.assignee)}</span>` : ''}</div>
-      <div class="alert-actions">
+      <div class="alert-actions" ${can('analyst') ? '' : 'hidden'}>
         ${a.status === 'Open' ? '<button class="btn-secondary" data-action="acknowledge" type="button">Acknowledge</button>' : ''}
         ${a.status === 'Acknowledged' ? '<button class="btn-secondary" data-action="resolve" type="button">Mark resolved</button>' : ''}
         ${a.status !== 'Resolved' && !a.assignee ? '<button class="btn-secondary" data-action="assign" type="button">Assign to me</button>' : ''}

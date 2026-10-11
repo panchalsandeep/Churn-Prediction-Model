@@ -4,7 +4,10 @@ Everything is keyed by workspace_id, so accounts never see each other's data.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import json
+import os
 import threading
 import time
 import uuid
@@ -124,6 +127,51 @@ audit_t = sa.Table(
     sa.Column('action', sa.String(60), nullable=False),
     sa.Column('detail', sa.Text),
     sa.Column('ts', sa.Float, nullable=False),
+    sa.Column('prev_hash', sa.String(64)),       # hash chain: each entry commits to the one before it
+    sa.Column('hash', sa.String(64)),
+)
+
+workspaces_t = sa.Table(
+    'workspaces', metadata,
+    sa.Column('id', sa.String(80), primary_key=True),
+    sa.Column('name', sa.String(160), nullable=False),
+    sa.Column('plan', sa.String(24), nullable=False, server_default='trial'),
+    sa.Column('status', sa.String(12), nullable=False, server_default='active'),   # active | deleted
+    sa.Column('sso_required', sa.Boolean, nullable=False, server_default=sa.false()),
+    sa.Column('created_at', sa.Float, nullable=False),
+)
+
+memberships_t = sa.Table(
+    'memberships', metadata,
+    sa.Column('workspace_id', sa.String(80), primary_key=True),
+    sa.Column('user_uid', sa.String(128), primary_key=True),
+    sa.Column('email', sa.String(254)),
+    sa.Column('role', sa.String(12), nullable=False),            # viewer | analyst | admin | owner
+    sa.Column('status', sa.String(12), nullable=False),          # active | disabled
+    sa.Column('created_at', sa.Float, nullable=False),
+)
+sa.Index('ix_memberships_user', memberships_t.c.user_uid)
+
+invites_t = sa.Table(
+    'invites', metadata,
+    sa.Column('token_hash', sa.String(64), primary_key=True),     # only a hash is stored; the token is shown once
+    sa.Column('workspace_id', sa.String(80), nullable=False, index=True),
+    sa.Column('email', sa.String(254), nullable=False),
+    sa.Column('role', sa.String(12), nullable=False),
+    sa.Column('created_by', sa.String(254)),
+    sa.Column('created_at', sa.Float, nullable=False),
+    sa.Column('expires_at', sa.Float, nullable=False),
+    sa.Column('accepted_at', sa.Float),
+)
+
+keys_t = sa.Table(
+    'workspace_keys', metadata,
+    sa.Column('workspace_id', sa.String(80), primary_key=True),
+    sa.Column('provider', sa.String(20), nullable=False),
+    sa.Column('wrapped_dek', sa.LargeBinary),
+    sa.Column('status', sa.String(12), nullable=False),            # active | shredded
+    sa.Column('created_at', sa.Float, nullable=False),
+    sa.Column('shredded_at', sa.Float),
 )
 
 kv_t = sa.Table(
@@ -136,6 +184,56 @@ kv_t = sa.Table(
 
 _engine: Engine | None = None
 _lock = threading.Lock()
+
+# The workspace whose rows the current request/job may touch. On PostgreSQL this becomes `app.workspace_id`, which row-level
+# security policies check (migration 0003). Empty means "no tenant": nothing is visible (fail closed). '*' is the system context.
+workspace_context: contextvars.ContextVar[str] = contextvars.ContextVar('churn_workspace', default='')
+
+
+@contextlib.contextmanager
+def workspace_scope(ws: str):
+    token = workspace_context.set(ws)
+    try:
+        yield
+    finally:
+        workspace_context.reset(token)
+
+
+@contextlib.contextmanager
+def system_context():
+    """Cross-tenant access for the few operations that need it (login lookup, queue admission, job claiming)."""
+    with workspace_scope('*'):
+        yield
+
+
+_MIGRATIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'migrations')
+
+
+def _adopt_legacy(conn) -> None:
+    """A database created by the old create_all() has no alembic_version. Bring it to the baseline shape."""
+    metadata.create_all(conn, checkfirst=True)
+    cols = {c['name'] for c in sa.inspect(conn).get_columns('audit_log')}
+    for name in ('prev_hash', 'hash'):
+        if name not in cols:
+            conn.exec_driver_sql(f'ALTER TABLE audit_log ADD COLUMN {name} VARCHAR(64)')
+
+
+def migrate(engine: Engine) -> None:
+    """Bring the schema to the latest revision (idempotent; safe when several workers start at once on Postgres)."""
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config()
+    cfg.set_main_option('script_location', _MIGRATIONS_DIR)
+    with engine.begin() as conn:
+        if conn.dialect.name == 'postgresql':
+            conn.exec_driver_sql('SELECT pg_advisory_xact_lock(727274)')
+        cfg.attributes['connection'] = conn
+        tables = set(sa.inspect(conn).get_table_names())
+        if 'alembic_version' not in tables and 'models' in tables:
+            _adopt_legacy(conn)
+            command.stamp(cfg, '0001')
+        command.upgrade(cfg, 'head')
 
 
 def new_id() -> str:
@@ -153,6 +251,10 @@ def get_engine() -> Engine:
             if url.startswith('sqlite'):
                 kwargs['connect_args'] = {'check_same_thread': False, 'timeout': 30}
             _engine = sa.create_engine(url, **kwargs)
+            if url.startswith('postgresql'):
+                @sa.event.listens_for(_engine, 'begin')
+                def _tenant_context(conn):  # noqa: ANN001
+                    conn.exec_driver_sql("SELECT set_config('app.workspace_id', %s, true)", (workspace_context.get(),))
             if url.startswith('sqlite'):
                 @sa.event.listens_for(_engine, 'connect')
                 def _pragmas(dbapi_conn, _):  # noqa: ANN001
@@ -160,7 +262,7 @@ def get_engine() -> Engine:
                     cur.execute('PRAGMA journal_mode=WAL')
                     cur.execute('PRAGMA synchronous=NORMAL')
                     cur.close()
-            metadata.create_all(_engine)
+            migrate(_engine)
         return _engine
 
 
@@ -200,7 +302,33 @@ def _json_default(o):
     return str(o)
 
 
+def _audit_hash(prev: str, workspace_id: str, actor: str | None, action: str, detail: str | None, ts: float) -> str:
+    import hashlib
+    payload = '\x1f'.join([prev, workspace_id, actor or '', action, detail or '', repr(round(ts, 6))])
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def audit(workspace_id: str, actor: str | None, action: str, detail: Any = None) -> None:
+    """Append a tamper-evident entry: its hash covers the previous entry's hash, so any edit or deletion breaks the chain."""
+    detail_s = dumps(detail) if detail is not None else None
+    ts = time.time()
     with get_engine().begin() as conn:
-        conn.execute(audit_t.insert().values(workspace_id=workspace_id, actor=actor, action=action,
-                                             detail=dumps(detail) if detail is not None else None, ts=time.time()))
+        if conn.dialect.name == 'postgresql':       # serialise appends per workspace so the chain cannot fork
+            conn.execute(sa.text('SELECT pg_advisory_xact_lock(hashtext(:ws))'), {'ws': workspace_id})
+        prev = conn.execute(sa.select(audit_t.c.hash).where(audit_t.c.workspace_id == workspace_id)
+                            .order_by(audit_t.c.id.desc()).limit(1)).scalar() or ''
+        conn.execute(audit_t.insert().values(workspace_id=workspace_id, actor=actor, action=action, detail=detail_s, ts=ts, prev_hash=prev,
+                                             hash=_audit_hash(prev, workspace_id, actor, action, detail_s, ts)))
+
+
+def verify_audit(workspace_id: str) -> dict:
+    """Recompute the chain. Reports the first entry that was altered, removed or reordered."""
+    prev, n = '', 0
+    with get_engine().connect() as conn:
+        for r in conn.execute(sa.select(audit_t).where(audit_t.c.workspace_id == workspace_id).order_by(audit_t.c.id)):
+            if r.hash is None:                      # entries from before the chain existed
+                continue
+            if r.prev_hash != prev or r.hash != _audit_hash(prev, workspace_id, r.actor, r.action, r.detail, r.ts):
+                return {'ok': False, 'checked': n, 'first_bad_id': r.id}
+            prev, n = r.hash, n + 1
+    return {'ok': True, 'checked': n, 'first_bad_id': None}

@@ -115,8 +115,36 @@ def _numeric_like(series: pd.Series) -> pd.Series | None:
     return None
 
 
-def infer_schema(df: pd.DataFrame, target: str | None = None) -> dict:
-    """Return a JSON-serialisable description of how each column will be used."""
+PII_NAMES = re.compile(r'(^|_)(e_?mail|phone|mobile|msisdn|ssn|social_security|passport|national_id|tax_id|first_name|last_name|full_name|'
+                       r'surname|given_name|address|street|postal|zip_?code|ip_?addr(ess)?|dob|date_of_birth|birth_?date|credit_?card|card_number|'
+                       r'iban|latitude|longitude|geo_?loc)($|_)')
+EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+SSN_RE = re.compile(r'^\d{3}-\d{2}-\d{4}$')
+
+
+def detect_pii(series: pd.Series, name: str) -> str | None:
+    """Why this column looks like personal data (or None). Looks at the name and, for text, a sample of the values."""
+    if PII_NAMES.search(_norm(name)):
+        return 'column name suggests personal data'
+    if not (pdt.is_object_dtype(series) or pdt.is_string_dtype(series)):
+        return None
+    sample = series.dropna().astype(str).head(200)
+    if len(sample) < 5:
+        return None
+    if sample.map(lambda v: bool(EMAIL_RE.match(v))).mean() > 0.3:
+        return 'values look like email addresses'
+    if sample.map(lambda v: bool(SSN_RE.match(v))).mean() > 0.3:
+        return 'values look like national ID numbers'
+    return None
+
+
+def infer_schema(df: pd.DataFrame, target: str | None = None, exclude: list[str] | None = None,
+                 allow_pii: list[str] | None = None) -> dict:
+    """Return a JSON-serialisable description of how each column will be used.
+
+    Personal-data columns are never used as features and never stored unless explicitly allowed (`allow_pii`);
+    `exclude` lists extra columns to ignore entirely.
+    """
     if len(df) < 50:
         raise ValueError('Need at least 50 rows to train a meaningful model.')
 
@@ -140,45 +168,54 @@ def infer_schema(df: pd.DataFrame, target: str | None = None) -> dict:
     categorical: list[str] = []
     dates: list[str] = []
     id_col: str | None = None
+    pii_cols: list[str] = []
 
     def put(col, role, reason=''):
         roles[col] = {'name': col, 'role': role, 'reason': reason}
 
+    exclude_set, allow_set = set(exclude or []), set(allow_pii or [])
     for col in feature_candidates:
         s = work[col]
         n_unique = int(s.nunique(dropna=True))
         norm = _norm(col)
         missing = float(s.isna().mean())
+        pii_reason = None if col in allow_set else detect_pii(s, col)
 
-        dt = _as_datetime(s)
-        if dt is not None and not (id_col is None and n_unique >= 0.9 * n and re.search(r'(^|_)id$', norm)):
-            # Dates first: a constant "as of" snapshot date is a legitimate time reference, not junk.
-            dates.append(col)
-            put(col, 'date', 'parsed as date')
-            work[col] = dt
-        elif n_unique <= 1:
-            put(col, 'drop', 'constant column')
-        elif id_col is None and (re.search(r'(^|_)id$|^id$|customer_?id|account_?id|user_?id|^uuid$', norm)
-                                 and n_unique >= 0.9 * n):
-            id_col = col
-            put(col, 'id', 'unique identifier')
+        if col in exclude_set:
+            put(col, 'drop', 'excluded by you')
+        elif pii_reason and not re.search(r'(^|_)id$|customer_?id|account_?id', norm):
+            put(col, 'pii', pii_reason)
+            pii_cols.append(col)
         else:
-            num = _numeric_like(s)
-            if num is not None:
-                work[col] = num
-                if num.nunique(dropna=True) <= 1:
-                    put(col, 'drop', 'constant column')
-                elif (n_unique >= 0.98 * n and n > 200 and bool((num.dropna() % 1 == 0).all())
-                      and not re.search(r'(charge|amount|revenue|spend|balance|salary|price|fee)', norm)):
-                    put(col, 'drop', 'looks like an identifier')
-                else:
-                    numeric.append(col)
-                    put(col, 'numeric')
-            elif n_unique > max(50, 0.05 * n):
-                put(col, 'drop', f'high-cardinality text ({n_unique} values)')
+            dt = _as_datetime(s)
+            if dt is not None and not (id_col is None and n_unique >= 0.9 * n and re.search(r'(^|_)id$', norm)):
+                # Dates first: a constant "as of" snapshot date is a legitimate time reference, not junk.
+                dates.append(col)
+                put(col, 'date', 'parsed as date')
+                work[col] = dt
+            elif n_unique <= 1:
+                put(col, 'drop', 'constant column')
+            elif id_col is None and (re.search(r'(^|_)id$|^id$|customer_?id|account_?id|user_?id|^uuid$', norm)
+                                     and n_unique >= max(20, 0.02 * n)):      # IDs repeat when a customer has several snapshots
+                id_col = col
+                put(col, 'id', 'unique identifier')
             else:
-                categorical.append(col)
-                put(col, 'categorical')
+                num = _numeric_like(s)
+                if num is not None:
+                    work[col] = num
+                    if num.nunique(dropna=True) <= 1:
+                        put(col, 'drop', 'constant column')
+                    elif (n_unique >= 0.98 * n and n > 200 and bool((num.dropna() % 1 == 0).all())
+                          and not re.search(r'(charge|amount|revenue|spend|balance|salary|price|fee)', norm)):
+                        put(col, 'drop', 'looks like an identifier')
+                    else:
+                        numeric.append(col)
+                        put(col, 'numeric')
+                elif n_unique > max(50, 0.05 * n):
+                    put(col, 'drop', f'high-cardinality text ({n_unique} values)')
+                else:
+                    categorical.append(col)
+                    put(col, 'categorical')
         roles[col]['missing_pct'] = round(missing * 100, 1)
         roles[col]['n_unique'] = n_unique
         roles[col]['dtype'] = str(df[col].dtype)
@@ -225,6 +262,16 @@ def infer_schema(df: pd.DataFrame, target: str | None = None) -> dict:
         if purity > 0.995 and len(grp) > 1:
             warnings.append(f'"{col}" nearly determines churn by itself; check it is not derived from the outcome.')
 
+    n_groups, grouped = n, False
+    if id_col is not None:
+        n_groups = int(work[id_col].nunique())
+        grouped = n_groups < 0.98 * n
+        if grouped:
+            warnings.append(f'{n:,} rows belong to {n_groups:,} customers (about {n / n_groups:.1f} snapshots each). '
+                            'Validation keeps every customer on one side of the split so scores are not inflated by memorising customers.')
+    if pii_cols:
+        warnings.append('Personal data detected and left out of the model and storage: ' + ', '.join(pii_cols[:6])
+                        + '. Mark a column as safe with allow_pii if this is a false positive.')
     heavy_missing = [c for c in numeric + categorical if roles[c]['missing_pct'] > 40]
     if heavy_missing:
         warnings.append(f'Many missing values in: {", ".join(heavy_missing[:5])}. They are imputed and flagged with a missing-indicator.')
@@ -248,9 +295,12 @@ def infer_schema(df: pd.DataFrame, target: str | None = None) -> dict:
         'tenure_col': tenure_col,
         'activity_col': activity_col,
         'columns': [roles[c] for c in feature_candidates if c in roles],
-        'dropped': [{'name': c, 'reason': roles[c]['reason']} for c in feature_candidates if roles[c]['role'] == 'drop'],
+        'dropped': [{'name': c, 'reason': roles[c]['reason']} for c in feature_candidates if roles[c]['role'] in ('drop', 'pii')],
+        'pii': pii_cols,
         'warnings': warnings,
         'rows': int(n),
+        'grouped': grouped,
+        'n_groups': n_groups,
         'rows_ignored': dropped_rows,
         'positive_rate': round(rate, 4),
     }

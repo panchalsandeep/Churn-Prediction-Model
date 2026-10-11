@@ -37,7 +37,7 @@ def _mark_stale_once() -> None:
         if _marked_stale:
             return
         _marked_stale = True
-    with db.get_engine().begin() as c:
+    with db.system_context(), db.get_engine().begin() as c:
         c.execute(sa.update(db.jobs_t).where(db.jobs_t.c.status.in_(['queued', 'running']))
                   .values(status='error', error='Interrupted by a server restart', finished_at=time.time()))
 
@@ -55,7 +55,7 @@ def _update(job_id: str, **values) -> None:
 def _admit(ws: str) -> None:
     """Fairness and back-pressure: one job per workspace, a bounded global queue, old rows cleaned up."""
     j = db.jobs_t
-    with db.get_engine().begin() as c:
+    with db.system_context(), db.get_engine().begin() as c:
         c.execute(sa.delete(j).where(j.c.status.in_(['done', 'error']), j.c.finished_at < time.time() - config.JOB_RETENTION_DAYS * 86400))
         mine = c.execute(sa.select(sa.func.count()).where(j.c.workspace_id == ws, j.c.status.in_(['queued', 'running']))).scalar()
         queued = c.execute(sa.select(sa.func.count()).where(j.c.status == 'queued')).scalar()
@@ -74,6 +74,10 @@ def submit(ws: str, kind: str, fn: Callable[[Callable[[str, int], None]], dict])
                                             stage='Queued', created_at=time.time()))
 
     def run() -> None:
+        with db.workspace_scope(ws):
+            _run()
+
+    def _run() -> None:
         _update(job_id, status='running', stage='Starting', progress=1)
 
         def progress(stage: str, pct: int) -> None:
@@ -103,7 +107,7 @@ def get(ws: str, job_id: str) -> dict | None:
     d = dict(r._mapping)
     d['result'] = db.loads(d.get('result'))
     if d['status'] == 'queued':          # tell people where they are in line
-        with db.get_engine().connect() as c:
+        with db.system_context(), db.get_engine().connect() as c:
             ahead = c.execute(sa.select(sa.func.count()).where(db.jobs_t.c.status == 'queued', db.jobs_t.c.created_at < d['created_at'])).scalar()
         d['stage'] = f'Queued · {ahead + 1} in line'
     return d

@@ -31,6 +31,7 @@ function renderSchema(res) {
   const row = (label, value, hint = '') =>
     `<div class="schema-item"><span>${label}</span><b>${value}</b>${hint ? `<small>${hint}</small>` : ''}</div>`;
   const warnings = s.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('');
+  const pii = (s.pii || []).map(c => `<label class="pii-row"><input type="checkbox" class="pii-allow" value="${escapeHtml(c)}" /> Use <b>${escapeHtml(c)}</b> anyway (false positive)</label>`).join('');
   const dropped = s.dropped.slice(0, 6).map(d => `<span class="chip-static" title="${escapeHtml(d.reason)}">${escapeHtml(d.name)}</span>`).join('');
   box.innerHTML = `
     <div class="schema-title">Detected schema <span class="ok-dot"></span></div>
@@ -43,7 +44,8 @@ function renderSchema(res) {
       ${row('Revenue', s.revenue_col ? escapeHtml(s.revenue_col) : 'not found', s.revenue_col ? 'used for revenue at risk' : 'ranking uses risk only')}
     </div>
     ${dropped ? `<div class="schema-dropped"><span>Ignored:</span> ${dropped}${s.dropped.length > 6 ? ` +${s.dropped.length - 6}` : ''}</div>` : ''}
-    ${warnings ? `<ul class="schema-warnings">${warnings}</ul>` : ''}`;
+    ${warnings ? `<ul class="schema-warnings">${warnings}</ul>` : ''}
+    ${pii ? `<div class="pii-box"><strong>Personal data was found</strong> and is excluded from the model and never stored.${pii}</div>` : ''}`;
   box.hidden = false;
   replay(box, 'pop-in');
 }
@@ -81,6 +83,7 @@ async function setFile(f) {
   } else {
     form.append('file', f);
   }
+  form.append('exclude_columns', $('exclude-columns').value);
   try {
     $('schema-preview').innerHTML = '<div class="schema-title">Reading your file…</div><div class="skeleton" style="width:70%"></div>';
     $('schema-preview').hidden = false;
@@ -146,6 +149,8 @@ export function initUpload({ onTrained }) {
     const form = new FormData();
     form.append('file', file);
     form.append('algorithm', algorithm);
+    form.append('exclude_columns', $('exclude-columns').value);
+    form.append('allow_pii', qsa('.pii-allow:checked').map(c => c.value).join(','));
     try {
       const result = await run('/upload', { form }, 'Uploading…');
       await onTrained(result);

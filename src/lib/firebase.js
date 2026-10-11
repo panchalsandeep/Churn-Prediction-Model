@@ -16,8 +16,8 @@ let cached = null;
 export function loadFirebase() {
   cached ??= (async () => {
     const [{ initializeApp }, authMod] = await Promise.all([
-      import('firebase/app'),
-      import('firebase/auth'),
+      import('@firebase/app'),
+      import('@firebase/auth'),
     ]);
     const app = initializeApp(firebaseConfig);
     const auth = authMod.getAuth(app);
@@ -25,7 +25,7 @@ export function loadFirebase() {
     // Analytics is non-essential: load it when the browser is idle.
     const idle = window.requestIdleCallback || (cb => setTimeout(cb, 2000));
     idle(() => {
-      import('firebase/analytics')
+      import('@firebase/analytics')
         .then(({ getAnalytics, isSupported }) => isSupported().then(ok => ok && getAnalytics(app)))
         .catch(() => {});
     });

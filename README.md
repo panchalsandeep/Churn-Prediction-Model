@@ -54,7 +54,15 @@ Anything tabular with a churn label. Best results come from behavioural features
 | POST · PATCH · GET | `/api/customers/<id>/interventions` · `/api/interventions/<id>` · `/api/interventions/summary` | Closed loop |
 | GET · PATCH | `/api/admin/users` · `/api/admin/audit` | Admin only |
 
-## Auth and tenancy
+## Auth, roles and tenancy
+
+- **Roles per workspace:** `viewer` (read) < `analyst` (+ export, work alerts, log actions) < `admin` (+ train, score, settings, manage people) < `owner` (+ admins, SSO, delete workspace). New people join by **single-use invitation**; platform administrators (`ADMIN_EMAILS`) provision workspaces.
+- **MFA and SSO:** admin/owner require a second factor in production (`REQUIRE_MFA_ROLES`); a workspace can require SAML/OIDC single sign-on. Both are configured in Firebase/Identity Platform and enforced here.
+- **Encryption and privacy:** per-workspace keys, encrypted artifacts and fields, personal-data columns excluded and never stored, optional ID pseudonymisation, erasure and subject-access export, workspace deletion with key destruction. **Production needs `CHURN_MASTER_KEY`** (or KMS).
+- **Audit:** hash-chained and append-only; view and export it under Settings.
+- Details and residual risks: [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md). Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Auth behaviour
 
 - **Local/dev:** without Firebase Admin credentials, auth is bypassed and everything runs in the `local` workspace.
 - **Production:** auth **fails closed** (HTTP 503) until Firebase Admin is configured. Set `ADMIN_EMAILS` for admin features.
@@ -91,9 +99,12 @@ Designed to be hosted publicly: size-aware training, a bounded job queue with pe
 ## Tests and CI
 
 ```bash
-python -m pytest tests -q        # ~3 min; includes the model-quality gate
+pip install -r requirements-dev.txt
+python -m pytest tests -q        # ~8 min; includes the model-quality gate, security, RBAC and migration tests
 npm run build
 ```
+
+CI also runs the suite on PostgreSQL (row-level security, experimental until its first green run), scans dependencies and the image, and builds the container.
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs both on every push and pull request. The quality gate fails the build if ROC-AUC, PR-AUC lift, top-decile lift or calibration fall below fixed floors on generated data.
 

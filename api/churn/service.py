@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 
-from . import config, db, economics, registry, training
+from . import config, crypto, db, economics, registry, training
 from .config import data_dir
 from .schema import prepare_features
 
@@ -19,6 +19,7 @@ DEFAULT_SETTINGS = {
     'thresholds': {'mode': 'auto', 'high': None, 'medium': None},
     'alert_rules': {'high_risk': {'enabled': True}, 'risk_jump': {'enabled': True, 'delta': 0.15}},
     'revenue_column': None,
+    'privacy': {'hash_ids': False},
 }
 # Explanations are the CPU-heavy part of serving. A small gate keeps a burst of them from starving cheap reads.
 _explain_gate = threading.BoundedSemaphore(config.MAX_CONCURRENT_EXPLAIN)
@@ -94,6 +95,8 @@ def save_settings(ws: str, patch: dict) -> dict:
                 current['alert_rules'][rid].update({k: v for k, v in rules[rid].items() if k in ('enabled', 'delta')})
     if 'revenue_column' in patch:
         current['revenue_column'] = patch['revenue_column'] or None
+    if isinstance(patch.get('privacy'), dict) and 'hash_ids' in patch['privacy']:
+        current['privacy']['hash_ids'] = bool(patch['privacy']['hash_ids'])
     with db.get_engine().begin() as c:
         c.execute(sa.delete(db.settings_t).where(db.settings_t.c.workspace_id == ws))
         c.execute(db.settings_t.insert().values(workspace_id=ws, settings=db.dumps(current), updated_at=time.time()))
@@ -137,6 +140,48 @@ def _clean_attr(v):
     return v
 
 
+RAW_IMPORTANCE_FLOOR = 0.02      # a missing column carrying at least this share of importance blocks scoring
+
+
+def schema_check(bundle: dict, df: pd.DataFrame, allow_missing: bool = False) -> dict:
+    """Check an incoming batch against the model's data contract and say exactly what is wrong.
+
+    Silent NaN-filling of a missing column quietly wrecks accuracy, so important gaps are errors by default.
+    """
+    schema = bundle['schema']
+    feeding = schema['numeric'] + schema['categorical'] + [d for d in schema['dates'] if d != schema.get('time_col')]
+    share: dict[str, float] = {}
+    for item in bundle['importance']:
+        f = item['feature']
+        raw = f[:-9] if f.endswith('_age_days') and f[:-9] in schema['dates'] else f
+        share[raw] = share.get(raw, 0.0) + item['importance']
+    missing = [c for c in feeding if c not in df.columns]
+    important = [c for c in missing if share.get(c, 0) >= RAW_IMPORTANCE_FLOOR]
+    errors, warnings = [], []
+    if not allow_missing:
+        if important:
+            errors.append('Missing columns the model relies on: ' + ', '.join(f'{c} ({share[c] * 100:.0f}% of importance)' for c in important)
+                          + '. Add them, or pass allow_missing to score anyway.')
+        elif len(missing) >= 0.3 * max(len(feeding), 1):
+            errors.append(f'{len(missing)} of {len(feeding)} model columns are missing ({", ".join(missing[:6])}…).')
+    if missing and not errors:
+        warnings.append('Columns not in this file will be treated as missing: ' + ', '.join(missing[:8]))
+    for c in schema['numeric']:
+        if c in df.columns and len(df):
+            bad = pd.to_numeric(df[c], errors='coerce').isna() & df[c].notna()
+            if bad.mean() > 0.3:
+                warnings.append(f'"{c}" is mostly non-numeric in this file ({bad.mean():.0%} unreadable values).')
+    base_null = bundle.get('null_rates', {})
+    for c in feeding:
+        if c in df.columns and c in base_null and len(df):
+            jump = float(df[c].isna().mean()) - base_null[c]
+            if jump > 0.3:
+                warnings.append(f'"{c}" is {df[c].isna().mean():.0%} empty here versus {base_null[c]:.0%} in training.')
+    extra = [c for c in df.columns if c not in feeding and c != schema['target'] and c != schema.get('id')
+             and c != schema.get('time_col')]
+    return {'ok': not errors, 'errors': errors, 'warnings': warnings, 'missing': missing, 'unused_columns': extra[:20]}
+
+
 def build_scored_frame(ws: str, bundle: dict, df: pd.DataFrame, settings: dict, *, X: pd.DataFrame | None = None,
                        probs: np.ndarray | None = None, reasons_by_pos: dict | None = None,
                        revenue: np.ndarray | None = None) -> pd.DataFrame:
@@ -146,6 +191,8 @@ def build_scored_frame(ws: str, bundle: dict, df: pd.DataFrame, settings: dict, 
     econ = settings['economics']
     cols = bundle['cols']
 
+    if X is None and schema.get('time_col') in df.columns:   # newest snapshot last so de-duplication keeps the latest row
+        df = df.iloc[np.argsort(pd.to_datetime(df[schema['time_col']], errors='coerce').to_numpy(), kind='stable')].reset_index(drop=True)
     if X is None:
         X = prepare_features(df, schema).reindex(columns=cols)
         for c in bundle['cat_cols']:
@@ -224,7 +271,8 @@ def persist_scores(ws: str, model_id: str, scored: pd.DataFrame) -> None:
                 'prev_prob': prev.get(r.customer_id), 'tier': r.tier, 'revenue': float(r.revenue),
                 'tenure': None if pd.isna(r.tenure) else float(r.tenure), 'activity': None if pd.isna(r.activity) else float(r.activity),
                 'expected_loss': float(r.expected_loss), 'actual': None if pd.isna(r.actual) else int(r.actual),
-                'top_driver': r.top_driver, 'reasons': r.reasons, 'attrs': r.attrs,
+                'top_driver': _text(r.top_driver), 'reasons': crypto.encrypt_text(ws, _text(r.reasons), _fctx(r.customer_id, 'reasons')),
+                'attrs': crypto.encrypt_text(ws, _text(r.attrs), _fctx(r.customer_id, 'attrs')),
             })
         for i in range(0, len(rows), 5000):
             conn.execute(db.customers_t.insert(), rows[i:i + 5000])
@@ -242,14 +290,39 @@ def refresh_counts(ws: str) -> dict:
     return counts
 
 
+def _text(v):
+    """Missing text arrives from pandas as NaN; the database wants None."""
+    return v if isinstance(v, str) else None
+
+
+def _fctx(customer_id: str, column: str) -> str:
+    return f'{customer_id}|{column}'
+
+
+def _open(ws: str, customer_id: str, column: str, value: str | None):
+    """Decrypt a stored field (no-op for plaintext) and parse its JSON."""
+    return db.loads(crypto.decrypt_text(ws, value, _fctx(customer_id, column)))
+
+
 def save_snapshot(ws: str, model_id: str, scored: pd.DataFrame) -> str:
-    path = os.path.join(registry.model_dir(ws, model_id), 'customers.csv.gz')
-    scored.to_csv(path, index=False, compression={'method': 'gzip', 'compresslevel': 3})
+    """Scored customers for one model version, gzipped then encrypted with the workspace key."""
+    import gzip
+    import io
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode='wb', compresslevel=3) as gz:
+        gz.write(scored.to_csv(index=False).encode())
+    path = os.path.join(registry.model_dir(ws, model_id), 'customers.cse')
+    with open(path, 'wb') as f:
+        f.write(crypto.encrypt_bytes(ws, buf.getvalue(), f'snapshot|{model_id}'))
     return path
 
 
-def load_snapshot(path: str) -> pd.DataFrame:
-    df = pd.read_csv(path, compression='gzip', keep_default_na=True)
+def load_snapshot(ws: str, model_id: str, path: str) -> pd.DataFrame:
+    import gzip
+    import io
+    with open(path, 'rb') as f:
+        raw = gzip.decompress(crypto.decrypt_bytes(ws, f.read(), f'snapshot|{model_id}'))
+    df = pd.read_csv(io.BytesIO(raw), keep_default_na=True)
     for c in ('reasons', 'top_driver', 'attrs'):
         df[c] = df[c].where(df[c].notna(), None)
     return df
@@ -257,9 +330,9 @@ def load_snapshot(path: str) -> pd.DataFrame:
 
 # ── Alerts ─────────────────────────────────────────────────────────────────────
 
-def _signals(reasons_json: str | None) -> list[str]:
+def _signals(reasons: list | None) -> list[str]:
     out = []
-    for r in (db.loads(reasons_json, []) or [])[:3]:
+    for r in (reasons or [])[:3]:
         if r['impact'] > 0:
             out.append(f"{humanize(r['feature'])} = {r['value']} (+{r['impact']:.1f} pts)")
     return out
@@ -277,7 +350,7 @@ def regenerate_alerts(ws: str, settings: dict) -> int:
                 desired[(r.customer_id, 'high_risk')] = {
                     'severity': 'High', 'title': f'High churn risk ({r.prob * 100:.0f}%)',
                     'details': f'{r.customer_id} has a {r.prob * 100:.1f}% churn probability; about {r.expected_loss:,.0f} of revenue at risk.',
-                    'signals': _signals(r.reasons), 'expected_loss': r.expected_loss}
+                    'signals': _signals(_open(ws, r.customer_id, 'reasons', r.reasons)), 'expected_loss': r.expected_loss}
         if rules['risk_jump']['enabled']:
             delta = float(rules['risk_jump'].get('delta', 0.15))
             q = sa.select(cu).where(cu.c.workspace_id == ws, cu.c.prev_prob.is_not(None), (cu.c.prob - cu.c.prev_prob) >= delta) \
@@ -287,7 +360,7 @@ def regenerate_alerts(ws: str, settings: dict) -> int:
                     'severity': 'High' if r.tier == 'High' else 'Medium',
                     'title': f'Risk jumped {(r.prob - r.prev_prob) * 100:+.0f} pts',
                     'details': f'{r.customer_id} moved from {r.prev_prob * 100:.0f}% to {r.prob * 100:.0f}% churn probability since the last scoring run.',
-                    'signals': _signals(r.reasons), 'expected_loss': r.expected_loss})
+                    'signals': _signals(_open(ws, r.customer_id, 'reasons', r.reasons)), 'expected_loss': r.expected_loss})
         at = db.alerts_t
         existing = {(r.customer_id, r.rule): r for r in conn.execute(sa.select(at).where(at.c.workspace_id == ws, at.c.status != 'Resolved'))}
         for key, row in existing.items():
@@ -372,8 +445,8 @@ def refresh_segments(ws: str, bundle: dict) -> list[dict]:
     cu = db.customers_t
     recs = []
     with db.get_engine().connect() as c:
-        for r in c.execute(sa.select(cu.c.prob, cu.c.expected_loss, cu.c.tier, cu.c.attrs).where(cu.c.workspace_id == ws)):
-            attrs = db.loads(r.attrs, {})
+        for r in c.execute(sa.select(cu.c.customer_id, cu.c.prob, cu.c.expected_loss, cu.c.tier, cu.c.attrs).where(cu.c.workspace_id == ws)):
+            attrs = _open(ws, r.customer_id, 'attrs', r.attrs) or {}
             rec = {'prob': r.prob, 'expected_loss': r.expected_loss, 'tier': r.tier}
             for k in cats:
                 rec[k] = attrs.get(k)
@@ -438,7 +511,8 @@ def query_customers(ws: str, tier: str | None = None, q: str | None = None, sort
             cond.append(sa.and_(cu.c.customer_id >= q, cu.c.customer_id < q + '\uffff'))   # case-sensitive prefix: uses the primary-key index
         else:
             like = f'%{needle}%'
-            cond.append(sa.or_(sa.func.lower(cu.c.customer_id).like(like), sa.func.lower(sa.func.coalesce(cu.c.attrs, '')).like(like),
+            attr_match = [] if config.ENCRYPT_FIELDS else [sa.func.lower(sa.func.coalesce(cu.c.attrs, '')).like(like)]   # ciphertext can't be searched
+            cond.append(sa.or_(sa.func.lower(cu.c.customer_id).like(like), *attr_match,
                                sa.func.lower(sa.func.coalesce(cu.c.top_driver, '')).like(like)))
     if ids:
         cond.append(cu.c.customer_id.in_(ids))
@@ -463,8 +537,8 @@ def customer_detail(ws: str, customer_id: str) -> dict | None:
         r = c.execute(sa.select(cu).where(cu.c.workspace_id == ws, cu.c.customer_id == customer_id)).first()
     if not r:
         return None
-    attrs = db.loads(r.attrs, {})
-    reasons = db.loads(r.reasons)
+    attrs = _open(ws, customer_id, 'attrs', r.attrs) or {}
+    reasons = _open(ws, customer_id, 'reasons', r.reasons)
     if reasons is None and attrs:             # beyond the pre-computed top-N: explain on demand
         row, bundle = registry.champion_bundle(ws)
         if bundle:
@@ -529,6 +603,7 @@ def predict(ws: str, values: dict, explain: bool = True) -> dict:
     if not bundle:
         raise LookupError('No model trained yet.')
     record = {}
+    defaulted = [c for c in bundle['cols'] if c not in values or values[c] in (None, '')]
     for c in bundle['cols']:
         v = values.get(c, bundle['baseline'][c])
         if c in bundle['num_cols']:
@@ -546,7 +621,8 @@ def predict(ws: str, values: dict, explain: bool = True) -> dict:
     settings = get_settings(ws)
     thresholds = effective_thresholds(settings, bundle)
     tier = economics.tier_for(prob, thresholds)
-    out = {'churn_probability': round(prob * 100, 1), 'risk_level': tier, 'model_id': row['id'], 'thresholds': thresholds}
+    out = {'churn_probability': round(prob * 100, 1), 'risk_level': tier, 'model_id': row['id'], 'thresholds': thresholds,
+           'defaults_used': defaulted}
     rev_col = bundle['schema'].get('revenue_col')
     if rev_col and rev_col in record and not np.isnan(record[rev_col]):
         out['expected_loss'] = round(economics.expected_loss(prob, record[rev_col], settings['economics']), 2)
@@ -710,8 +786,22 @@ def _build_results(ws: str, rev=None) -> dict | None:
 
 # ── Training / scoring jobs ────────────────────────────────────────────────────
 
+def apply_id_policy(ws: str, df: pd.DataFrame, settings: dict, exclude=None, allow_pii=None, target=None) -> pd.DataFrame:
+    """Optionally replace customer ids with workspace-specific pseudonyms before anything is trained or stored."""
+    if not settings.get('privacy', {}).get('hash_ids'):
+        return df
+    from .schema import infer_schema
+    id_col = infer_schema(df, target, exclude, allow_pii).get('id')
+    if not id_col:
+        return df
+    out = df.copy()
+    out[id_col] = out[id_col].map(lambda v: crypto.pseudonymize_id(ws, v))
+    return out
+
+
 def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, progress, promote: bool | None = None,
-                 source: str = 'upload', target: str | None = None) -> dict:
+                 source: str = 'upload', target: str | None = None, exclude: list[str] | None = None,
+                 allow_pii: list[str] | None = None) -> dict:
     steps: dict[str, float] = {}
     mark = [time.perf_counter()]
 
@@ -721,7 +811,8 @@ def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, p
         mark[0] = now
 
     settings = get_settings(ws)
-    result = training.train_model(df, algorithm, settings['economics'], progress, target)
+    df = apply_id_policy(ws, df, settings, exclude, allow_pii, target)
+    result = training.train_model(df, algorithm, settings['economics'], progress, target, exclude, allow_pii)
     bundle, meta = result['bundle'], result['meta']
     meta['source'] = source
     lap('train')
@@ -764,7 +855,7 @@ def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
     snapshot = target.get('data_path')
     if bundle and snapshot and os.path.exists(snapshot):
         settings = get_settings(ws)
-        scored = load_snapshot(snapshot)
+        scored = load_snapshot(ws, model_id, snapshot)
         thresholds = effective_thresholds(settings, bundle)
         scored['tier'] = [economics.tier_for(p, thresholds) for p in scored['prob']]
         scored['expected_loss'] = scored['prob'] * scored['revenue'] * settings['economics']['value_months']
@@ -778,10 +869,14 @@ def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
     return {'model_id': model_id}
 
 
-def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress) -> dict:
+def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress, allow_missing: bool = False) -> dict:
     row, bundle = registry.champion_bundle(ws)
     if not bundle:
         raise ValueError('Train a model first, then score new data with it.')
+    df = apply_id_policy(ws, df, get_settings(ws))
+    check = schema_check(bundle, df, allow_missing)
+    if not check['ok']:
+        raise ValueError(' '.join(check['errors']))
     settings = get_settings(ws)
     progress('Scoring new data', 20)
     scored = build_scored_frame(ws, bundle, df, settings)
@@ -791,6 +886,7 @@ def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress) ->
     drift = training.drift_report(bundle['drift_ref'], X, scored['prob'].to_numpy())
     drift['rows'] = int(len(scored))
     drift['scored_at'] = time.time()
+    drift['schema_check'] = check
     progress('Saving scores', 70)
     persist_scores(ws, row['id'], scored)
     regenerate_alerts(ws, settings)
@@ -802,7 +898,7 @@ def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress) ->
         c.execute(db.score_batches_t.insert().values(id=db.new_id(), workspace_id=ws, model_id=row['id'], created_at=time.time(),
                                                      rows=int(len(scored)), drift=db.dumps(drift)))
     db.audit(ws, actor, 'batch.score', {'rows': int(len(scored)), 'drift': drift['status']})
-    return {'rows': int(len(scored)), 'drift': drift}
+    return {'rows': int(len(scored)), 'drift': drift, 'schema_check': check}
 
 
 def apply_settings_change(ws: str) -> None:

@@ -26,7 +26,8 @@ from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score
-from sklearn.model_selection import RandomizedSearchCV, StratifiedKFold, cross_val_predict, cross_val_score
+from sklearn.model_selection import (RandomizedSearchCV, StratifiedGroupKFold, StratifiedKFold, cross_val_predict,
+                                     cross_val_score)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -85,11 +86,11 @@ HGB_SPACE = {
 }
 
 
-def tune_hgb(X: pd.DataFrame, y: np.ndarray, num_cols: list[str], cat_cols: list[str], n_iter: int) -> dict:
+def tune_hgb(X: pd.DataFrame, y: np.ndarray, num_cols: list[str], cat_cols: list[str], n_iter: int, cv=None) -> dict:
     """Small randomised search for the boosted model, scored on PR-AUC. Benchmarks showed this is the one tuning step that pays."""
     search = RandomizedSearchCV(make_pipeline('gradient_boosting', num_cols, cat_cols), HGB_SPACE, n_iter=n_iter,
                                 scoring='average_precision', refit=False, random_state=0, n_jobs=1,
-                                cv=StratifiedKFold(3, shuffle=True, random_state=0))
+                                cv=cv if cv is not None else StratifiedKFold(3, shuffle=True, random_state=0))
     search.fit(X, y)
     return {k.replace('clf__', ''): v for k, v in search.best_params_.items()}
 
@@ -119,11 +120,52 @@ def make_pipeline(kind: str, num_cols: list[str], cat_cols: list[str], hgb_param
     return Pipeline([('pre', pre), ('clf', clf)])
 
 
-def _calibrated(pipe: Pipeline, n_train: int, inner_cv: int = 3) -> CalibratedClassifierCV:
+class GroupedCV:
+    """Stratified K-fold that never splits a customer across folds.
+
+    Group labels are looked up through the *index* of the data being split, so one object works for every subset
+    (selection sample, training part, calibration folds) that keeps the original row labels.
+    """
+
+    def __init__(self, groups: pd.Series, n_splits: int = 3, seed: int = RANDOM_STATE):
+        self.groups, self.n_splits, self.seed = groups, n_splits, seed
+
+    def get_n_splits(self, X=None, y=None, groups=None) -> int:
+        return self.n_splits
+
+    def split(self, X, y=None, groups=None):
+        g = self.groups.loc[X.index].to_numpy()
+        yield from StratifiedGroupKFold(self.n_splits, shuffle=True, random_state=self.seed).split(X, y, g)
+
+
+def _calibrated(pipe: Pipeline, n_train: int, inner_cv=3) -> CalibratedClassifierCV:
     return CalibratedClassifierCV(pipe, method='isotonic' if n_train >= ISOTONIC_MIN_ROWS else 'sigmoid', cv=inner_cv)
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def provenance(data_hash: str, schema_sig: str) -> dict:
+    """Everything needed to reproduce, audit, or safely refuse to load a model later."""
+    import platform
+    import subprocess
+    import sys as _sys
+
+    import scipy
+    import sklearn
+
+    sha = os.environ.get('GIT_SHA')
+    if not sha:
+        try:
+            sha = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], capture_output=True, text=True, timeout=3,
+                                 cwd=os.path.dirname(os.path.abspath(__file__))).stdout.strip() or None
+        except Exception:  # noqa: BLE001
+            sha = None
+    return {
+        'python': platform.python_version(), 'scikit_learn': sklearn.__version__, 'numpy': np.__version__,
+        'pandas': pd.__version__, 'scipy': scipy.__version__, 'code_version': sha, 'seed': RANDOM_STATE,
+        'trained_at': time.time(), 'data_hash': data_hash, 'schema_signature': schema_sig, 'bundle_format': 3,
+    }
+
 
 def dataset_hash(df: pd.DataFrame) -> str:
     h = hashlib.sha256(pd.util.hash_pandas_object(df, index=False).values.tobytes())
@@ -136,8 +178,11 @@ def schema_signature(schema: dict) -> str:
     return hashlib.sha1(key.encode()).hexdigest()[:12]
 
 
-def _split_indices(df: pd.DataFrame, schema: dict, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, str]:
-    """Time-based split when possible, otherwise stratified random."""
+def _split_indices(df: pd.DataFrame, schema: dict, y: np.ndarray, groups: pd.Series | None = None) -> tuple[np.ndarray, np.ndarray, str, int]:
+    """Time-based split when possible, otherwise stratified random. Customers never straddle the split.
+
+    Returns (train_idx, test_idx, kind, rows_dropped_to_prevent_leakage).
+    """
     n = len(df)
     time_col = schema.get('time_col')
     if time_col and time_col in df.columns:
@@ -146,8 +191,18 @@ def _split_indices(df: pd.DataFrame, schema: dict, y: np.ndarray) -> tuple[np.nd
             order = np.argsort(t.fillna(t.min()).to_numpy(), kind='stable')
             cut = int(n * 0.8)
             train_idx, test_idx = order[:cut], order[cut:]
+            dropped = 0
+            if groups is not None:           # a customer seen in the future must not also be in training
+                seen_in_test = set(groups.iloc[test_idx])
+                keep_train = np.array([g not in seen_in_test for g in groups.iloc[train_idx]])
+                dropped = int((~keep_train).sum())
+                train_idx = train_idx[keep_train]
             if y[test_idx].sum() >= 5 and (len(test_idx) - y[test_idx].sum()) >= 5 and y[train_idx].sum() >= 10:
-                return train_idx, test_idx, 'time'
+                return train_idx, test_idx, 'time', dropped
+    if groups is not None:
+        sgkf = StratifiedGroupKFold(5, shuffle=True, random_state=RANDOM_STATE)
+        train_idx, test_idx = next(sgkf.split(np.zeros(n), y, groups.to_numpy()))
+        return np.sort(train_idx), np.sort(test_idx), 'random', 0
     rng = np.random.default_rng(RANDOM_STATE)
     train_idx, test_idx = [], []
     for cls in (0, 1):
@@ -156,7 +211,7 @@ def _split_indices(df: pd.DataFrame, schema: dict, y: np.ndarray) -> tuple[np.nd
         cut = int(len(idx) * 0.8)
         train_idx.extend(idx[:cut])
         test_idx.extend(idx[cut:])
-    return np.array(sorted(train_idx)), np.array(sorted(test_idx)), 'random'
+    return np.array(sorted(train_idx)), np.array(sorted(test_idx)), 'random', 0
 
 
 def _baseline(X: pd.DataFrame, num_cols: list[str], cat_cols: list[str]) -> dict:
@@ -478,23 +533,32 @@ def build_personas(X: pd.DataFrame, num_cols: list[str], cat_cols: list[str], y:
 # ── Main entry ─────────────────────────────────────────────────────────────────
 
 def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = None, progress: Progress = _noop,
-                target: str | None = None) -> dict:
+                target: str | None = None, exclude: list[str] | None = None, allow_pii: list[str] | None = None) -> dict:
     t0 = time.time()
     econ = economics.merged(econ)
     algorithm = algorithm if algorithm in ALGORITHMS else 'auto'
 
     progress('Detecting schema', 5)
-    schema = infer_schema(df, target)
+    schema = infer_schema(df, target, exclude, allow_pii)
     keep = normalize_target(df[schema['target']]).notna().to_numpy()
     df = df.loc[keep].reset_index(drop=True)
     y = normalize_target(df[schema['target']]).astype(int).to_numpy()
+
+    # Newest snapshot last, so "keep the latest row per customer" is really the latest.
+    if schema.get('time_col') and schema['time_col'] in df.columns:
+        order = np.argsort(pd.to_datetime(df[schema['time_col']], errors='coerce').to_numpy(), kind='stable')
+        df = df.iloc[order].reset_index(drop=True)
+        y = normalize_target(df[schema['target']]).astype(int).to_numpy()
+    groups = df[schema['id']].astype(str) if schema.get('grouped') and schema.get('id') in df.columns else None
 
     X = prepare_features(df, schema)
     num_cols, cat_cols = model_columns(schema)
     cols = num_cols + cat_cols
     X = X[cols]
 
-    train_idx, test_idx, split = _split_indices(df, schema, y)
+    train_idx, test_idx, split, leak_dropped = _split_indices(df, schema, y, groups)
+    make_cv = (lambda k, seed=RANDOM_STATE: GroupedCV(groups, k, seed)) if groups is not None \
+        else (lambda k, seed=RANDOM_STATE: StratifiedKFold(k, shuffle=True, random_state=seed))
     Xtr, ytr = X.iloc[train_idx], y[train_idx]
     Xte, yte = X.iloc[test_idx], y[test_idx]
 
@@ -506,7 +570,7 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
     if len(Xtr) > plan['select_rows']:
         sub = np.random.default_rng(RANDOM_STATE).choice(len(Xtr), plan['select_rows'], replace=False)
         sel_X, sel_y = Xtr.iloc[sub], ytr[sub]
-    cv = StratifiedKFold(3, shuffle=True, random_state=RANDOM_STATE)
+    cv = make_cv(3)
     hp: dict = {}                                    # tuned boosting hyper-parameters, filled in when that candidate runs
     comparison = []
     for i, kind in enumerate(kinds):
@@ -515,9 +579,9 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
         if kind == 'gradient_boosting_tuned':
             progress('Tuning gradient boosting', 15 + int(25 * i / len(kinds)))
             tune_rows = min(len(sel_X), 20_000)
-            hp = tune_hgb(sel_X.iloc[:tune_rows], sel_y[:tune_rows], num_cols, cat_cols, plan['tune_iter'])
+            hp = tune_hgb(sel_X.iloc[:tune_rows], sel_y[:tune_rows], num_cols, cat_cols, plan['tune_iter'], cv=make_cv(3, 0))
             # Score it with different folds than the search used, so tuning can't flatter itself.
-            fold_cv = StratifiedKFold(3, shuffle=True, random_state=RANDOM_STATE + 1)
+            fold_cv = make_cv(3, RANDOM_STATE + 1)
         else:
             fold_cv = cv
         score = cross_val_score(make_pipeline(kind, num_cols, cat_cols, hp), sel_X, sel_y, cv=fold_cv, scoring='average_precision')
@@ -528,7 +592,7 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
 
     # 2) Calibrated model on train, evaluated on the untouched holdout
     progress('Calibrating probabilities', 45)
-    holdout_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(Xtr)).fit(Xtr, ytr)
+    holdout_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(Xtr), make_cv(3)).fit(Xtr, ytr)
     p_test = clip_probs(holdout_model.predict_proba(Xte)[:, 1])
 
     base_rate = float(y.mean())
@@ -564,14 +628,15 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
     # 4) Honest per-customer scores: out-of-fold predictions
     progress('Scoring customers (out-of-fold)', 70)
     outer = plan['oof_outer']
-    oof_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(X) * (outer - 1) // outer, inner_cv=plan['oof_inner'])
-    p_oof = cross_val_predict(oof_model, X, y, cv=StratifiedKFold(outer, shuffle=True, random_state=RANDOM_STATE),
+    oof_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(X) * (outer - 1) // outer, make_cv(plan['oof_inner']))
+    p_oof = cross_val_predict(oof_model, X, y, cv=make_cv(outer),
                               method='predict_proba')[:, 1]
     p_oof = clip_probs(p_oof)
 
     # 5) Deployable model on all the data
     progress('Fitting final model', 82)
-    final_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(X)).fit(X, y)
+    final_model = _calibrated(make_pipeline(best, num_cols, cat_cols, hp), len(X), make_cv(3)).fit(X, y)
+    final_model.set_params(cv=3)      # the fitted splitter holds every customer id: never let it into a stored artifact
 
     baseline = _baseline(X, num_cols, cat_cols)
     ranges = _feature_ranges(X, num_cols, cat_cols)
@@ -591,6 +656,8 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
         'num_cols': num_cols, 'cat_cols': cat_cols, 'cols': cols, 'econ': econ, 'thresholds': thresholds,
         'importance': importance, 'drift_ref': drift_ref, 'version': 2,
         'base_rate': base_rate, 'avg_revenue': avg_rev,
+        'null_rates': {c: round(float(X[c].isna().mean()), 4) for c in cols},
+        'provenance': provenance(dataset_hash(df), schema_signature(schema)),
     }
     meta = {
         'algorithm': best, 'algorithm_name': PRETTY[best], 'comparison': comparison, 'split': split,
@@ -600,6 +667,8 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
         'data_hash': dataset_hash(df), 'schema_signature': schema_signature(schema),
         'calibration_method': 'isotonic' if len(Xtr) >= ISOTONIC_MIN_ROWS else 'sigmoid',
         'plan': plan['tier'],
+        'validation': {'grouped': groups is not None, 'groups': int(groups.nunique()) if groups is not None else None,
+                       'rows_dropped_for_leakage': int(leak_dropped), 'split': split},
     }
     progress('Finalising', 96)
     return {

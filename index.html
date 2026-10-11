@@ -142,8 +142,12 @@
       </div>
     </div>
 
+    <div class="card upload-denied reveal" id="upload-denied" hidden>
+      <h3 class="card-title">Training is for admins</h3>
+      <p>Your role can explore results but not upload data or train models. Ask a workspace admin, or open <strong>Overview</strong> to see the current model.</p>
+    </div>
     <div class="upload-grid">
-      <div class="card upload-card">
+      <div class="card upload-card" data-min-role="admin">
         <h3 class="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
           Upload dataset
@@ -168,6 +172,10 @@
         </div>
 
         <div class="schema-preview" id="schema-preview" hidden aria-live="polite"></div>
+        <div class="form-group exclude-row">
+          <label for="exclude-columns">Never use these columns <small>(comma-separated; optional)</small></label>
+          <input type="text" id="exclude-columns" placeholder="e.g. internal_notes, sales_rep" autocomplete="off" />
+        </div>
 
         <div class="algo-select-group">
           <label class="input-label">Model</label>
@@ -179,12 +187,12 @@
           </div>
         </div>
 
-        <button class="btn-primary btn-full" id="train-btn" type="button" disabled>
+        <button class="btn-primary btn-full" id="train-btn" type="button" data-min-role="admin" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Train model
         </button>
         <div class="or-divider"><span>or</span></div>
-        <button class="btn-secondary btn-full" id="demo-btn" type="button">Try the demo dataset · 8,000 SaaS customers</button>
+        <button class="btn-secondary btn-full" id="demo-btn" type="button" data-min-role="admin">Try the demo dataset · 8,000 SaaS customers</button>
 
         <div class="progress-wrap" id="progress-wrap" hidden aria-live="polite">
           <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
@@ -221,8 +229,8 @@
         <p class="lede" id="overview-lede">Train a model to unlock live risk, holdout metrics, and action cues.</p>
       </div>
       <div class="section-actions">
-        <button class="btn-secondary" id="retrain-btn" type="button">Retrain model</button>
-        <button class="btn-primary" id="export-overview-btn" type="button">Export risk CSV</button>
+        <button class="btn-secondary" id="retrain-btn" type="button" data-min-role="admin">Retrain model</button>
+        <button class="btn-primary" id="export-overview-btn" type="button" data-min-role="analyst">Export risk CSV</button>
       </div>
     </div>
 
@@ -459,13 +467,13 @@
       <label class="page-size" for="page-size">Rows
         <select id="page-size" aria-label="Rows per page"><option>10</option><option selected>20</option><option>50</option><option>100</option></select>
       </label>
-      <button class="btn-secondary btn-toolbar" id="export-customers-btn" type="button">Export CSV</button>
+      <button class="btn-secondary btn-toolbar" id="export-customers-btn" type="button" data-min-role="analyst">Export CSV</button>
     </div>
 
     <div class="bulk-bar" id="bulk-bar" hidden>
       <span id="bulk-count">0 selected</span>
       <div class="bulk-actions">
-        <button class="btn-secondary btn-small" id="bulk-export" type="button">Export selected</button>
+        <button class="btn-secondary btn-small" id="bulk-export" type="button" data-min-role="analyst">Export selected</button>
         <button class="btn-secondary btn-small" id="bulk-clear" type="button">Clear</button>
       </div>
     </div>
@@ -566,10 +574,10 @@
         </div>
         <div class="admin-actions">
           <button class="btn-secondary btn-full" id="admin-refresh-btn" type="button">Refresh data</button>
-          <button class="btn-secondary btn-full" id="admin-score-btn" type="button">Score a new batch (CSV)…</button>
+          <button class="btn-secondary btn-full" id="admin-score-btn" type="button" data-min-role="admin">Score a new batch (CSV)…</button>
           <input type="file" id="score-file" accept=".csv" hidden />
-          <button class="btn-secondary btn-full" id="admin-load-sample-btn" type="button">Load demo workspace</button>
-          <button class="btn-primary btn-full danger" id="admin-reset-model-btn" type="button">Reset workspace</button>
+          <button class="btn-secondary btn-full" id="admin-load-sample-btn" type="button" data-min-role="admin">Load demo workspace</button>
+          <button class="btn-primary btn-full danger" id="admin-reset-model-btn" type="button" data-min-role="owner">Reset workspace</button>
         </div>
       </div>
 
@@ -594,8 +602,23 @@
           <div class="form-group checkbox-group"><label><input type="checkbox" id="set-alert-high" /> Alert on high-risk accounts</label></div>
           <div class="form-group checkbox-group"><label><input type="checkbox" id="set-alert-jump" /> Alert when risk jumps</label>
             <input type="number" min="0.05" max="0.9" step="0.05" id="set-jump" class="inline-num" aria-label="Risk jump size" /></div>
-          <button class="btn-primary btn-full" id="admin-save-settings-btn" type="button">Save &amp; re-score tiers</button>
+          <button class="btn-primary btn-full" id="admin-save-settings-btn" type="button" data-min-role="admin">Save &amp; re-score tiers</button>
         </form>
+      </div>
+
+      <div class="card table-card admin-card admin-wide" id="team-card" data-min-role="admin">
+        <div class="table-card-header">
+          <div><h3>Team &amp; access</h3><p id="team-sub">Loading…</p></div>
+          <form id="invite-form" class="invite-form">
+            <input type="email" id="invite-email" placeholder="colleague@company.com" required aria-label="Invite by email" />
+            <select id="invite-role" aria-label="Role"></select>
+            <button class="btn-primary btn-small" type="submit">Invite</button>
+          </form>
+        </div>
+        <div id="invite-result" class="invite-result" hidden></div>
+        <div class="table-wrapper"><table class="customer-table"><thead><tr><th>Member</th><th>Role</th><th>Since</th><th></th></tr></thead>
+          <tbody id="members-body"></tbody></table></div>
+        <div class="sso-row" data-min-role="owner"><label><input type="checkbox" id="sso-required" /> Require single sign-on (SAML / OIDC) for this workspace. Password logins are refused.</label></div>
       </div>
 
       <div class="card table-card admin-card admin-wide">
@@ -605,14 +628,35 @@
           <tbody id="registry-body"><tr><td class="empty-row" colspan="8">No models yet.</td></tr></tbody></table></div>
       </div>
 
+      <div class="card admin-card" id="privacy-card" data-min-role="admin">
+        <h3>Privacy &amp; data</h3>
+        <div class="form-group checkbox-group"><label><input type="checkbox" id="hash-ids" /> Pseudonymise customer IDs on new uploads (HMAC, irreversible, per workspace)</label></div>
+        <form id="erase-form" class="privacy-form">
+          <label for="erase-ids">Erase customers on request</label>
+          <textarea id="erase-ids" rows="2" placeholder="Customer IDs, separated by commas or spaces"></textarea>
+          <button class="btn-secondary btn-small" type="submit">Erase from live data and snapshots</button>
+        </form>
+        <form id="dsar-form" class="privacy-form">
+          <label for="dsar-id">Export everything stored about one customer</label>
+          <div class="inline-row"><input type="text" id="dsar-id" placeholder="Customer ID" /><button class="btn-secondary btn-small" type="submit">Download JSON</button></div>
+        </form>
+        <div class="danger-zone" data-min-role="owner">
+          <h4>Danger zone</h4>
+          <p>Deleting the workspace removes all data and destroys its encryption key. This cannot be undone.</p>
+          <button class="btn-danger btn-small" id="delete-workspace" type="button">Delete this workspace…</button>
+        </div>
+      </div>
+
       <div class="card admin-card">
         <h3>Drift monitoring</h3>
         <p class="admin-intro">Score a fresh batch to compare it with the training data. PSI under 0.1 is stable; over 0.25 is a major shift.</p>
         <div id="drift-panel"><div class="empty-card">No batch scored yet.</div></div>
       </div>
 
-      <div class="card admin-card" id="audit-card" hidden>
-        <h3>Recent activity</h3>
+      <div class="card admin-card" id="audit-card" data-min-role="admin">
+        <div class="card-title-row"><h3>Audit log</h3><span class="risk-tag" id="chain-badge">…</span></div>
+        <p class="admin-intro">Append-only and hash-chained: any edit or deletion is detected.</p>
+        <button class="btn-secondary btn-small" id="audit-export" type="button">Export log</button>
         <ul class="audit-list" id="audit-list"><li class="empty-card">No activity yet.</li></ul>
       </div>
 
@@ -651,7 +695,7 @@
       <div class="drawer-block">
         <h4>Activity</h4>
         <ul class="activity-list" id="drawer-activity"></ul>
-        <form class="log-form" id="log-form">
+        <form class="log-form" id="log-form" data-min-role="analyst">
           <select id="log-kind" aria-label="Action type"><option value="call">Call</option><option value="email">Email</option><option value="discount">Discount offer</option><option value="meeting">Meeting</option><option value="other">Other</option></select>
           <input type="text" id="log-notes" placeholder="What did you do?" maxlength="300" aria-label="Notes" />
           <button class="btn-secondary btn-small" type="submit">Log action</button>
@@ -732,6 +776,19 @@
   </div>
 </div>
 
+
+<!-- Shown when sign-in succeeded but access is not allowed yet (MFA, SSO, no workspace) -->
+<div id="access-gate" class="auth-overlay" hidden role="alertdialog" aria-labelledby="gate-title">
+  <div class="auth-card gate-card">
+    <h2 class="auth-title" id="gate-title">Access needed</h2>
+    <p class="auth-subtitle" id="gate-text"></p>
+    <form id="gate-invite" class="gate-invite" hidden>
+      <input type="text" id="gate-token" placeholder="Paste your invitation code" autocomplete="off" />
+      <button class="btn-primary btn-full" type="submit">Join workspace</button>
+    </form>
+    <button class="btn-secondary btn-full" id="gate-signout" type="button">Sign out</button>
+  </div>
+</div>
 
 <!-- Toast (body level so it shows on every section) -->
 <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>

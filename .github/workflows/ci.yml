@@ -2,16 +2,64 @@ name: CI
 on:
   push: { branches: [main] }
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
+    name: backend (${{ matrix.name }})
     runs-on: ubuntu-latest
+    # The oldest-versions leg has never been run (no Python 3.12 locally); it may need its constraints adjusted once.
+    continue-on-error: ${{ matrix.deps == 'oldest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest versions we claim to support (requirements-oldest.txt as constraints; pandas 2.2.2 has no 3.13 wheels)
+          - { name: 'python 3.12, oldest supported deps', python: '3.12', deps: oldest }
+          # Whatever requirements.txt resolves to today (verified locally on 3.13 in an empty virtualenv)
+          - { name: 'python 3.13, newest deps', python: '3.13', deps: latest }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: '3.12', cache: pip }
-      - run: pip install -r requirements.txt
-      # Includes the model-quality gate (ROC-AUC / PR-AUC / lift / calibration floors on generated data).
+        with: { python-version: '${{ matrix.python }}' }
+      - name: Install (oldest supported)
+        if: matrix.deps == 'oldest'
+        run: pip install -r requirements-dev.txt -c requirements-oldest.txt
+      - name: Install (newest)
+        if: matrix.deps == 'latest'
+        run: pip install -r requirements-dev.txt
+      # Includes the model-quality gate, group-aware validation, security, RBAC, tenant isolation and migration tests
       - run: python -m pytest tests -q
+
+  postgres:
+    name: backend on PostgreSQL (row-level security)
+    runs-on: ubuntu-latest
+    # Experimental until the first green run: the RLS path has never been exercised on a real Postgres during development.
+    continue-on-error: true
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install -r requirements-dev.txt
+      - name: Create a plain (non-superuser, no BYPASSRLS) application role that owns the database
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE ROLE churn_app LOGIN PASSWORD 'churn_app' NOSUPERUSER NOBYPASSRLS"
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE churn OWNER churn_app"
+      - name: Run the whole suite on PostgreSQL as that role
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://churn_app:churn_app@localhost:5432/churn
+        run: python -m pytest tests -q
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -20,3 +68,39 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run build
+
+  security:
+    name: dependency and image scanning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install pip-audit -r requirements.txt
+      - name: Python dependencies (known vulnerabilities)
+        run: pip-audit --strict --progress-spinner off
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - name: JavaScript dependencies (high and critical only)
+        run: npm audit --omit=dev --audit-level=high
+      - name: Scan the repository and the container image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+
+  docker:
+    name: container builds and starts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t churnsight .
+      - name: Smoke test
+        run: |
+          docker run -d --name app -p 8080:8080 -e DATA_DIR=/data churnsight
+          for i in $(seq 1 30); do curl -sf http://localhost:8080/api/health && exit 0; sleep 2; done
+          docker logs app; exit 1

@@ -14,6 +14,9 @@ def _flag(name: str, default: bool = False) -> bool:
 
 
 ON_VERCEL = os.environ.get('VERCEL') == '1'
+PRODUCTION = ON_VERCEL or os.environ.get('FLASK_ENV') == 'production' or _flag('AUTH_FAIL_CLOSED')
+# Encrypt per-customer attributes and explanations at rest (breaks substring search over attributes, by design).
+ENCRYPT_FIELDS = _flag('ENCRYPT_FIELDS', PRODUCTION)
 
 
 def data_dir() -> str:

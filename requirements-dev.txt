@@ -1,0 +1,6 @@
+# Development and CI only (not installed in the production image)
+-r requirements.txt
+pytest>=9.0.3,<10
+pip-audit
+psutil
+waitress

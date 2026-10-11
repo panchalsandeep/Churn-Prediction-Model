@@ -5,9 +5,14 @@ export const state = {
   results: null,         // /api/results payload (never contains the full customer list)
   user: null,            // Firebase user
   idToken: null,
-  admin: { isAdmin: false },
+  admin: { isAdmin: false },                 // platform administrator (Firebase user management)
+  me: { role: 'owner', uid: 'local-dev', email: 'local-dev', workspace: { id: 'local', name: 'Local workspace' }, seats: 1 },
   currentSection: 'upload',
 };
+
+const RANK = { viewer: 0, analyst: 1, admin: 2, owner: 3 };
+/** Does the signed-in user hold at least this role? (The server enforces it; this only decides what to show.) */
+export const can = minimum => (RANK[state.me.role] ?? -1) >= RANK[minimum];
 
 export const $ = id => document.getElementById(id);
 export const qs = s => document.querySelector(s);

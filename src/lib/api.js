@@ -8,11 +8,13 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
     this.body = body;
+    this.code = body?.code;
   }
 }
 
 async function authHeaders() {
   const headers = {};
+  if (state.workspaceId) headers['X-Workspace'] = state.workspaceId;
   if (state.user) {
     // The SDK caches the token and refreshes it shortly before expiry, so no forced round-trip.
     state.idToken = await state.user.getIdToken();

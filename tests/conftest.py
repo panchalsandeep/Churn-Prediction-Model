@@ -23,6 +23,14 @@ def env(tmp_path_factory):
     data = tmp_path_factory.mktemp('data')
     os.environ['DATA_DIR'] = str(data)
     os.environ.pop('DATABASE_URL', None)
+    pg_url = os.environ.get('TEST_DATABASE_URL')
+    if pg_url:                       # run the suite against PostgreSQL, one throw-away schema per test module
+        import uuid
+        import sqlalchemy as sa
+        schema = f't_{uuid.uuid4().hex[:8]}'
+        with sa.create_engine(pg_url, isolation_level='AUTOCOMMIT').connect() as c:
+            c.exec_driver_sql(f'CREATE SCHEMA {schema}')
+        os.environ['DATABASE_URL'] = pg_url + ('&' if '?' in pg_url else '?') + f'options=-csearch_path%3D{schema}'
     from churn import config, db, jobs, registry
     from churn.security import limiter
     config.SYNC_JOBS = True

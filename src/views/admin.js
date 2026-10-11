@@ -1,6 +1,7 @@
 /* Settings & admin: model registry, economics/thresholds, drift monitoring, audit log, user management. */
-import { $, state, escapeHtml, showToast, fmtInt, humanize, setOverlay, timeAgo, on } from '../lib/ctx.js';
+import { $, state, escapeHtml, showToast, fmtInt, humanize, setOverlay, timeAgo, on, can } from '../lib/ctx.js';
 import { get, post, patch, runJob } from '../lib/api.js';
+import { loadTeam, initTeam } from './team.js';
 
 let callbacks = { reloadResults: async () => {}, navigate: () => {} };
 let users = [];
@@ -82,17 +83,6 @@ async function loadDrift() {
   } catch { /* ignore */ }
 }
 
-/* ── Audit ──────────────────────────────────────────────────── */
-async function loadAudit() {
-  if (!state.admin.isAdmin) return;
-  try {
-    const { events } = await get('/admin/audit');
-    $('audit-list').innerHTML = events.length ? events.slice(0, 25).map(e => `
-      <li><b>${escapeHtml(e.action)}</b><span>${escapeHtml(e.actor || '')}</span><small>${timeAgo(e.ts)}</small></li>`).join('')
-      : '<li class="empty-card">No activity yet.</li>';
-  } catch { /* ignore */ }
-}
-
 /* ── Users (Firebase) ───────────────────────────────────────── */
 async function loadUsers() {
   const list = $('admin-user-list');
@@ -126,13 +116,15 @@ export async function loadAdminPanel() {
   const r = state.results;
   $('admin-customer-count').textContent = r ? fmtInt(r.summary.total_customers) : '—';
   $('users-card').hidden = !state.admin.isAdmin;
-  $('audit-card').hidden = !state.admin.isAdmin;
-  $('workspace-badge').textContent = state.admin.isAdmin ? 'Admin' : 'Workspace';
-  await Promise.all([loadRegistry(), loadSettings(), loadDrift(), loadUsers(), loadAudit()]);
+  $('workspace-badge').textContent = state.me.role;
+  // Read-only roles can look at settings but not change them.
+  document.querySelectorAll('#admin-settings-form input, #admin-settings-form select').forEach(el => { el.disabled = !can('admin'); });
+  await Promise.all([loadRegistry(), loadSettings(), loadDrift(), loadUsers(), loadTeam()]);
 }
 
 export function initAdmin(cb) {
   callbacks = cb;
+  initTeam({ reloadResults: cb.reloadResults });
   $('set-mode').addEventListener('change', syncManualVisibility);
   $('admin-save-settings-btn').addEventListener('click', saveSettings);
   $('admin-refresh-btn').addEventListener('click', loadAdminPanel);
