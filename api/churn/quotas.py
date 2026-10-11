@@ -206,7 +206,7 @@ def check_job(ws: str, kind: str, rows: int | None) -> None:
 def on_job_success(ws: str, kind: str, rows: int | None, result: dict | None = None) -> None:
     if kind == 'demo':
         return
-    if kind in TRAIN_KINDS:
+    if kind in TRAIN_KINDS or (kind == 'mlops_check' and isinstance(result, dict) and result.get('retrained')):
         record(ws, 'training_runs', 1)
     if kind.startswith('pipeline_') and isinstance(result, dict):        # row counts are only known once the tables have been read
         rows = result.get('rows') or (result.get('scored_today') or {}).get('rows') or rows

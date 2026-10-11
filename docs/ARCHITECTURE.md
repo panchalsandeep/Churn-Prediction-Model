@@ -96,6 +96,25 @@ Accounts, product events, support tickets and invoices go in as four tables (CSV
 
 Limits worth knowing: static account attributes are as of the last upload (not versioned); the event vocabulary for per-event-type features is fixed at training time; the scheduler needs a worker loop (embedded or `python -m churn.worker`), so it does not run on serverless; event tables are held in memory when building features (cap `MAX_TABLE_ROWS`, default 5M rows per table).
 
+## MLOps loop (Phase 4)
+
+The platform does not retrain on inference-time data: a prediction is only a promise until the outcome is known. Instead every scoring run is logged (encrypted account ids and probabilities in blob storage, an index row in `score_runs`) and later *resolved*.
+
+| Step | Where | What happens |
+|---|---|---|
+| Log | `mlops.log_run` | Every batch or pipeline scoring run, plus the challenger's shadow run on the same rows |
+| Resolve | `mlops.resolve_due_runs`, `POST /api/runs/<id>/outcomes` | Pipeline runs resolve themselves once `as_of + horizon` has passed, reading outcomes from the tables; batch runs resolve when the customer uploads outcomes (customer_id, churned) covering at least 80% of the run |
+| Grade | `mlops.realized_metrics` | Realized ROC-AUC, PR-AUC, Brier, top-decile lift, calibration table, ECE, predicted/observed ratio |
+| Health | `mlops.assess_health` | ok / watch / degraded against what the model promised at training (ROC drop of 5 or 10 points, calibration ratio outside 0.67–1.5 or 0.5–2), on the last three resolved runs with 20+ churn events; degradation is audited and announced on the alert channels |
+| Retrain | `retrain.run_check` | When the model is old, drift is major, health is degraded, or enough new churn has been seen (all configurable), a *challenger* is trained from the tables with the live model's feature vocabulary. Pipeline workspaces only |
+| Shadow | `shadow.score`, `shadow.evaluate` | The challenger scores every run beside the champion. After N matched resolved runs it is compared on the same accounts and outcomes: it must gain the required PR-AUC points, must not have a worse Brier score, and must not lose ROC-AUC. It is then promoted automatically (opt-in) or the owner is told; after enough runs without a win it is archived |
+| Roll back | `shadow.rollback`, `POST /api/mlops/rollback` | Any promotion, manual or automatic, remembers the previous champion and can be reversed in one call |
+| Backtest | `backtest.run` | Retrains at several past dates using only data whose outcomes were known by then and scores the next horizon: expected performance and its period-to-period spread |
+
+Two design choices came out of testing: (1) drift is measured against the population *as it looked when the model was trained, built the same way scoring builds it*, and ignores features that only age with the calendar (tenure, days to renewal), otherwise every nightly run looked like major drift; (2) "days since last activity" counts working days of the product's own calendar, because counting calendar days made every account look a day staler when scored on a Saturday.
+
+Limits: the loop is validated only on simulated data with simulated time. Realized metrics need 20+ churn events per run to be trusted and horizons of weeks to months, so a young workspace will show "not enough outcomes yet". Shadow evaluation doubles scoring cost while a challenger exists. Segment-level regression checks and uplift are not built.
+
 ## More than one way to look at churn
 
 * **Predictive model** (calibrated, tuned boosting chosen against linear and forest baselines) for "who, how likely".

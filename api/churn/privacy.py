@@ -43,6 +43,8 @@ def erase_customers(ws: str, ids: list[str], actor: str | None) -> dict:
             rewritten += 1
     from . import ingest
     raw_rows = ingest.erase_accounts(ws, ids)             # raw events/tickets/invoices uploaded through the B2B pipeline
+    from . import mlops
+    raw_rows += mlops.erase_accounts(ws, ids)             # prediction logs hold account ids and scores
     service.refresh_counts(ws)
     service.bump(ws)
     db.audit(ws, actor, 'privacy.erase', {'customers': len(ids), 'removed_rows': erased, 'raw_rows': raw_rows})        # ids are not logged

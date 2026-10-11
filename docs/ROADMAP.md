@@ -284,7 +284,7 @@ What is useful at inference time is *cheap adaptation without retraining*: **rec
 **Phase 3: B2B data in (6–8 weeks). STATUS: built and tested locally against a synthetic B2B simulator and local stand-in servers; no vendor connector has run against a real service (see docs/ARCHITECTURE.md, B2B pipeline).** Connectors (Salesforce/HubSpot, Segment/Amplitude, Zendesk, Stripe, warehouse), account hierarchy and seat-level features, target-definition wizard (B2), event feature builder with point-in-time joins (B1), scheduled scoring, Slack/email alerts (C2).
 *Exit:* a workspace connects, scores nightly, and alerts an owner with no manual upload.
 
-**Phase 4: MLOps loop (4–6 weeks).** §8: label maturation, realized-performance monitoring, retraining pipeline, shadow evaluation, guarded promotion, rolling-origin backtests (B9/B10).
+**Phase 4: MLOps loop (4–6 weeks). STATUS: built and tested with simulated time on the synthetic B2B book; never run on a real customer's data (see docs/ARCHITECTURE.md, MLOps loop).** §8: label maturation, realized-performance monitoring, retraining pipeline, shadow evaluation, guarded promotion, rolling-origin backtests (B9/B10).
 *Exit:* a model retrains and promotes itself safely on a design-partner or simulated workspace, with every step audited.
 
 **Phase 5: B2B modelling and decisions (6–10 weeks).** Renewal-centric and revenue-churn models (contraction, CLV), multi-horizon survival (B3), reason codes → playbooks (C3), impact dashboard (C4), experiments with holdouts (C7), uplift (B4) when partner action data exists.

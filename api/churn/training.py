@@ -533,7 +533,8 @@ def build_personas(X: pd.DataFrame, num_cols: list[str], cat_cols: list[str], y:
 # ── Main entry ─────────────────────────────────────────────────────────────────
 
 def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = None, progress: Progress = _noop,
-                target: str | None = None, exclude: list[str] | None = None, allow_pii: list[str] | None = None) -> dict:
+                target: str | None = None, exclude: list[str] | None = None, allow_pii: list[str] | None = None,
+                drift_df: pd.DataFrame | None = None, drift_skip: list[str] | None = None) -> dict:
     t0 = time.time()
     econ = economics.merged(econ)
     algorithm = algorithm if algorithm in ALGORITHMS else 'auto'
@@ -640,7 +641,21 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
 
     baseline = _baseline(X, num_cols, cat_cols)
     ranges = _feature_ranges(X, num_cols, cat_cols)
-    drift_ref = _drift_reference(X, p_oof, num_cols, cat_cols)
+    ref_X, ref_p = X, p_oof
+    if schema.get('time_col') and schema['time_col'] in df.columns:
+        # With several snapshots, features that grow with time (tenure, days to renewal) differ between the pooled history and any
+        # new batch. Compare new data with the newest snapshot instead, or every new batch would look like drift.
+        stamp = pd.to_datetime(df[schema['time_col']], errors='coerce')
+        newest = (stamp == stamp.max()).to_numpy()
+        if newest.sum() >= max(200, 0.03 * len(df)):
+            ref_X, ref_p = X[newest], p_oof[newest]
+    if drift_df is not None and len(drift_df) >= 30:
+        # The population as it looks today (same builder as scoring): later batches are compared with this, so drift means change since training.
+        ref_X = prepare_features(drift_df, schema).reindex(columns=cols)
+        for c in cat_cols:
+            ref_X[c] = ref_X[c].fillna('Missing')
+        ref_p = clip_probs(final_model.predict_proba(ref_X)[:, 1])
+    drift_ref = _drift_reference(ref_X, ref_p, [c for c in num_cols if c not in set(drift_skip or [])], cat_cols)      # skip features that only age with the calendar
     cohorts = build_cohorts(df, X, schema, y, p_oof)
     progress('Finding customer personas', 86)
     survival = build_survival(df, X, schema, y)

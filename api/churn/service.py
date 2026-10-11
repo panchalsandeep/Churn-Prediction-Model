@@ -820,7 +820,7 @@ def apply_id_policy(ws: str, df: pd.DataFrame, settings: dict, exclude=None, all
 
 def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, progress, promote: bool | None = None,
                  source: str = 'upload', target: str | None = None, exclude: list[str] | None = None,
-                 allow_pii: list[str] | None = None) -> dict:
+                 allow_pii: list[str] | None = None, drift_df: pd.DataFrame | None = None, drift_skip: list[str] | None = None) -> dict:
     steps: dict[str, float] = {}
     mark = [time.perf_counter()]
 
@@ -831,7 +831,9 @@ def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, p
 
     settings = get_settings(ws)
     df = apply_id_policy(ws, df, settings, exclude, allow_pii, target)
-    result = training.train_model(df, algorithm, settings['economics'], progress, target, exclude, allow_pii)
+    if drift_df is not None:
+        drift_df = apply_id_policy(ws, drift_df, settings, exclude, allow_pii, target)
+    result = training.train_model(df, algorithm, settings['economics'], progress, target, exclude, allow_pii, drift_df, drift_skip)
     bundle, meta = result['bundle'], result['meta']
     meta['source'] = source
     lap('train')
@@ -867,6 +869,7 @@ def run_training(ws: str, df: pd.DataFrame, algorithm: str, actor: str | None, p
 
 
 def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
+    previous = registry.champion(ws)
     target = registry.set_champion(ws, model_id)
     if not target:
         raise LookupError('Model not found')
@@ -884,14 +887,17 @@ def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
         kv_set(ws, 'drift', None)
         bump(ws)
         build_results(ws)
+    if previous and previous['id'] != model_id:
+        kv_set(ws, 'mlops_previous', {'model_id': previous['id'], 'at': time.time()})
     db.audit(ws, actor, 'model.promote', {'model_id': model_id})
     return {'model_id': model_id}
 
 
-def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress, allow_missing: bool = False) -> dict:
+def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress, allow_missing: bool = False, run_meta: dict | None = None) -> dict:
     row, bundle = registry.champion_bundle(ws)
     if not bundle:
         raise ValueError('Train a model first, then score new data with it.')
+    raw_df = df
     df = apply_id_policy(ws, df, get_settings(ws))
     check = schema_check(bundle, df, allow_missing)
     if not check['ok']:
@@ -899,6 +905,13 @@ def run_batch_scoring(ws: str, df: pd.DataFrame, actor: str | None, progress, al
     settings = get_settings(ws)
     progress('Scoring new data', 20)
     scored = build_scored_frame(ws, bundle, df, settings)
+    try:                                       # every run is logged so that realized performance can be measured once outcomes are known
+        from . import mlops, shadow
+        meta = run_meta or {'source': 'batch'}
+        mlops.log_run(ws, row['id'], 'live', scored['customer_id'], scored['prob'], **meta)
+        shadow.score(ws, raw_df, settings, meta)
+    except Exception:  # noqa: BLE001
+        logging.getLogger('churnsight.mlops').warning('prediction logging failed', exc_info=True)
     X = prepare_features(df, bundle['schema']).reindex(columns=bundle['cols'])
     for c in bundle['cat_cols']:
         X[c] = X[c].fillna('Missing').astype(str)

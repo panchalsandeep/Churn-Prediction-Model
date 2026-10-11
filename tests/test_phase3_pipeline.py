@@ -290,3 +290,15 @@ def test_schedule_runs_due_pipelines_once_and_records_why_it_skipped(client, env
         assert pipeline.get_schedule(ws)['last_status'].startswith('skipped:') and 'allowance' in pipeline.get_schedule(ws)['last_status']
     finally:
         os.environ.pop('PLAN_LIMITS_JSON')
+
+
+def test_recency_does_not_depend_on_the_weekday_of_scoring(tables):
+    """Counting calendar days makes every account look 'one day staler' on a Saturday; working-day counting must not."""
+    friday, saturday = pd.Timestamp('2026-03-13'), pd.Timestamp('2026-03-14')
+    assert friday.day_name() == 'Friday' and saturday.day_name() == 'Saturday'
+    a = features.build_snapshot(tables, friday).set_index('customer_id')['days_since_last_activity']
+    b = features.build_snapshot(tables, saturday).set_index('customer_id')['days_since_last_activity']
+    common = a.index.intersection(b.index)
+    assert (b[common] - a[common]).abs().mean() < 0.3
+    monday = features.build_snapshot(tables, pd.Timestamp('2026-03-16')).set_index('customer_id')['days_since_last_activity']
+    assert (monday.reindex(common) - a[common]).abs().mean() < 1.5                    # a whole weekend later is one working day, not three calendar days

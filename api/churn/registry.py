@@ -138,6 +138,15 @@ def set_champion(ws: str, model_id: str) -> dict | None:
     return target
 
 
+def set_status(ws: str, model_id: str, status: str) -> None:
+    """Move a model between challenger and archived. A champion is never touched here (use set_champion)."""
+    if status not in ('challenger', 'archived'):
+        raise ValueError('Use set_champion to promote.')
+    with db.get_engine().begin() as conn:
+        conn.execute(sa.update(db.models_t).where(db.models_t.c.workspace_id == ws, db.models_t.c.id == model_id,
+                                                  db.models_t.c.status != 'champion').values(status=status))
+
+
 def _prune(ws: str) -> None:
     with db.get_engine().begin() as conn:
         rows = conn.execute(sa.select(db.models_t.c.id, db.models_t.c.status).where(db.models_t.c.workspace_id == ws)
@@ -153,9 +162,10 @@ def _prune(ws: str) -> None:
 
 def wipe(ws: str) -> None:
     with db.get_engine().begin() as conn:
-        for t in (db.models_t, db.customers_t, db.details_t, db.alerts_t, db.interventions_t, db.jobs_t, db.score_batches_t, db.kv_t):
+        for t in (db.models_t, db.customers_t, db.details_t, db.alerts_t, db.interventions_t, db.jobs_t, db.score_batches_t, db.score_runs_t, db.kv_t):
             conn.execute(sa.delete(t).where(t.c.workspace_id == ws))
     storage.get_storage().delete_prefix(storage.model_prefix(ws))
     storage.get_storage().delete_prefix(storage.upload_prefix(ws))
     storage.get_storage().delete_prefix(storage.table_prefix(ws))
+    storage.get_storage().delete_prefix(storage.model_prefix(ws).replace('models/', 'predlog/', 1))
     forget(ws)

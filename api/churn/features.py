@@ -22,6 +22,7 @@ WINDOWS = (7, 30, 90)
 FAILED = {'failed', 'past_due', 'unpaid', 'declined', 'uncollectible'}
 TARGET_TYPES = ('churn_date', 'inactivity')
 MAX_EVENT_TYPES = 5
+AGING = ['tenure_months', 'days_to_renewal']      # shift by the calendar alone as time passes; not evidence that the population changed
 
 
 class TargetError(ValueError):
@@ -76,6 +77,24 @@ def _count_windows(df: pd.DataFrame, as_of: pd.Timestamp, prefix: str, windows=W
     return pd.DataFrame(out)
 
 
+def _quiet_days(ev: pd.DataFrame, last: pd.Series, as_of: pd.Timestamp) -> pd.Series:
+    """Days since each account's last activity, counting only *working* days of the product's calendar.
+
+    Plain calendar days make the feature depend on the weekday of scoring (on a Saturday nobody was active "today"), which shifts every
+    account's score and looks like drift. A calendar day counts if total event volume that day was at least 40% of the recent median day,
+    so weekends and holidays drop out on their own, for any customer's rhythm.
+    """
+    daily = ev.groupby(ev['ts'].dt.normalize()).size()
+    trailing = daily[daily.index > as_of.normalize() - pd.Timedelta(days=90)]
+    threshold = max(1.0, 0.4 * float(trailing[trailing > 0].median())) if len(trailing) else 1.0
+    working = daily.index[daily >= threshold].sort_values()
+    if len(working) == 0:
+        return ((as_of - last).dt.days).astype(float)
+    pos = working.searchsorted(last.dt.normalize().to_numpy(), side='right')        # working days up to and including the last activity day
+    out = pd.Series((len(working) - pos).astype(float), index=last.index)
+    return out.where(last.notna())
+
+
 def build_snapshot(tables: dict, as_of: pd.Timestamp, vocab: list[str] | None = None) -> pd.DataFrame:
     """One row per account that was live at `as_of`, using only data stamped at or before it."""
     as_of = pd.Timestamp(as_of).normalize() + pd.Timedelta(hours=23, minutes=59, seconds=59)
@@ -105,7 +124,7 @@ def build_snapshot(tables: dict, as_of: pd.Timestamp, vocab: list[str] | None = 
             f[c] = f[c].fillna(0)
         f['events_trend'] = (f['events_30d'] / np.maximum(1.0, (f['events_90d'] - f['events_30d']) / 2.0)).round(3)
         last = ev.groupby('account_id')['ts'].max()
-        f['days_since_last_activity'] = ((as_of - last.reindex(f.index)).dt.days).astype(float)
+        f['days_since_last_activity'] = _quiet_days(ev, last.reindex(f.index), as_of)
         f['days_since_last_activity'] = f['days_since_last_activity'].fillna((as_of - live.set_index('account_id')['started_at'].reindex(f.index)).dt.days.clip(lower=0))
         recent = ev[ev['ts'] > as_of - pd.Timedelta(days=30)]
         f['active_days_30d'] = recent.assign(d=recent['ts'].dt.normalize()).groupby('account_id')['d'].nunique().reindex(f.index).fillna(0)
@@ -214,11 +233,11 @@ def preview_target(tables: dict, spec: dict, max_snapshots: int = 12) -> dict:
             'base_rate': round(pos_total / n_total, 4) if n_total else None, 'warnings': warnings, 'ok': bool(rows) and pos_total > 0}
 
 
-def build_training_frame(tables: dict, spec: dict, max_snapshots: int = 12) -> tuple[pd.DataFrame, dict]:
+def build_training_frame(tables: dict, spec: dict, max_snapshots: int = 12, vocab: list[str] | None = None) -> tuple[pd.DataFrame, dict]:
     """Stack labelled snapshots into one training table (customer_id, snapshot_date, features..., churned)."""
     spec = validate_spec(spec, tables)
     through = observed_through(tables, spec)
-    vocab = event_vocabulary(tables)
+    vocab = vocab if vocab is not None else event_vocabulary(tables)      # retraining reuses the live model's vocabulary so both score the same columns
     frames = []
     for d in snapshot_dates(tables, spec, through, max_snapshots):
         snap = build_snapshot(tables, d, vocab)
@@ -232,7 +251,8 @@ def build_training_frame(tables: dict, spec: dict, max_snapshots: int = 12) -> t
     df['churned'] = df['churned'].astype(int)
     if df['churned'].nunique() < 2:
         raise TargetError('Every row has the same label under this definition, so there is nothing to learn from.')
-    return df, {'vocab': vocab, 'observed_through': through.strftime('%Y-%m-%d'), 'snapshots': int(df['snapshot_date'].nunique()), 'rows': int(len(df))}
+    return df, {'vocab': vocab, 'observed_through': through.strftime('%Y-%m-%d'), 'snapshots': int(df['snapshot_date'].nunique()), 'rows': int(len(df)),
+                'positives': int(df['churned'].sum())}
 
 
 def build_scoring_frame(tables: dict, spec: dict, vocab: list[str] | None = None) -> tuple[pd.DataFrame, dict]:

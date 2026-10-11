@@ -59,6 +59,8 @@ Browser → API (TLS, Firebase ID token) · API → database · API → object/f
 * **Alert channels send customer information to third parties** (Slack, email providers) only when a channel opts in to account details; the default digest has counts and totals only.
 * **Connector credentials** (API tokens for the customer's vendor) are sealed with the workspace key but must be decrypted in the worker to be used, so a compromised worker can read them. Prefer read-only, narrowly scoped tokens.
 * **Ingest API keys** are bearer secrets with no IP allow-list or expiry; revoke on leak. Scope is limited to appending rows to the four tables.
+* **Prediction logs hold account ids and scores** (encrypted with the workspace key, erased on a deletion request, removed with the workspace). Outcome files uploaded to resolve runs are used once and not stored beyond the matched outcomes kept with the log.
+* **Automatic promotion is a decision made by software.** It is off by default, requires matched resolved outcomes on identical accounts and three independent conditions, is audited, and is reversible with one rollback. A poisoned or biased outcome feed would still mislead it: outcomes derived from the customer's own tables are only as trustworthy as those tables.
 * **Local key provider** keeps the master key in an environment variable. Use KMS/HSM in production (provider written, unverified).
 * **Field encryption disables attribute search** by design; searching is by customer id only.
 * **No Content-Security-Policy yet**, and no penetration test has been performed. Both are required before handling real customer data at scale.

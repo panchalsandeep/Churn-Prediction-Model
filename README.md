@@ -47,6 +47,8 @@ Anything tabular with a churn label. Best results come from behavioural features
 | PUT | `/api/pipeline/schedule` | Score automatically every N hours |
 | POST | `/api/ingest/<table>` | Push rows from your systems with an ingest API key (`Authorization: Bearer cs_live_…`) |
 | GET · POST · DELETE | `/api/api-keys` · `/api/sources` · `/api/channels` | Ingest keys, pull sources (JSON/CSV over HTTP), alert channels (Slack, signed webhook, email) |
+| GET · PUT · POST | `/api/mlops` · `/api/mlops/policy` · `/api/mlops/check` · `/api/mlops/backtest` · `/api/mlops/promote` · `/api/mlops/rollback` | Model health from realized outcomes, retraining policy, shadow challenger, backtest, promote and roll back |
+| GET · POST | `/api/runs` · `/api/runs/<id>/outcomes` | Scoring-run log; upload what actually happened (customer_id, churned) to grade a run |
 | GET | `/api/usage` · `/api/usage/export` | Plan, seats, monthly usage against limits (admin); usage CSV for billing |
 | GET · DELETE | `/api/invites` · `/api/invites/<id>` | Pending invitations; revoke one (frees its seat) |
 | PUT | `/api/platform/workspaces/<id>/plan` | Platform admin only: set a workspace's plan |

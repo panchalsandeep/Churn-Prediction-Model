@@ -682,6 +682,32 @@
         </div>
       </div>
 
+      <div class="card admin-card admin-wide" id="mlops-card" data-min-role="admin">
+        <div class="table-card-header"><div><h3>Model operations <span id="mlops-health" class="risk-tag">…</span></h3>
+          <p>Every scoring run is logged. When its outcome is known, the model is graded on what really happened.</p></div>
+          <div class="pipe-form"><button class="btn-secondary btn-small" id="mlops-check" type="button">Check now</button>
+            <button class="btn-secondary btn-small" id="mlops-retrain" type="button">Train a challenger</button>
+            <button class="btn-secondary btn-small" id="mlops-rollback" type="button" disabled>Roll back</button></div></div>
+        <div class="pipe-grid">
+          <section><h4>Realized performance</h4><div id="mlops-health-text"></div>
+            <div class="table-wrapper"><table class="customer-table"><thead><tr><th>Run</th><th>As of</th><th>Accounts</th><th>Outcome</th><th>ROC / PR-AUC</th><th>Churned</th><th></th></tr></thead>
+              <tbody id="mlops-runs"></tbody></table></div></section>
+          <section><h4>Challenger in shadow</h4><div id="mlops-shadow"></div>
+            <h4 style="margin-top:18px">Backtest <button class="btn-secondary btn-small" id="mlops-backtest-btn" type="button">Run</button></h4><div id="mlops-backtest"></div></section>
+          <section><h4>Retraining policy</h4>
+            <p class="muted" id="mlops-auto-note" hidden>Automatic retraining needs the data pipeline (tables and a churn definition). Uploads can still be graded with outcomes.</p>
+            <div class="pipe-form" style="flex-direction:column;align-items:flex-start">
+              <label class="inline-label"><input type="checkbox" id="pol-enabled" /> check automatically every few hours</label>
+              <label class="inline-label"><input type="checkbox" id="pol-on_drift" /> train a challenger when input data shifts a lot</label>
+              <label class="inline-label"><input type="checkbox" id="pol-on_degradation" /> train a challenger when realized performance degrades</label>
+              <label class="inline-label">and at least every <input type="number" id="pol-every_days" min="0" max="365" /> days (0 = never)</label>
+              <label class="inline-label">or after <input type="number" id="pol-min_new_positives" min="0" /> new churn events (0 = off)</label>
+              <label class="inline-label">promote after <input type="number" id="pol-shadow_min_runs" min="1" max="12" /> matched runs, needing <input type="number" id="pol-margin_pr_auc" min="0" step="0.5" /> PR-AUC points more</label>
+              <label class="inline-label"><input type="checkbox" id="pol-auto_promote" /> promote automatically when it wins (otherwise you are asked)</label>
+              <button class="btn-primary btn-small" id="mlops-policy-save" type="button">Save policy</button></div></section>
+        </div>
+      </div>
+
       <div class="card table-card admin-card admin-wide">
         <div class="table-card-header"><div><h3>Model registry</h3><p>Every training run is versioned. Promote any version to make it live.</p></div></div>
         <div class="table-wrapper"><table class="customer-table"><thead><tr>

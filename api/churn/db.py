@@ -208,6 +208,25 @@ api_keys_t = sa.Table(
     sa.Column('revoked_at', sa.Float),
 )
 
+score_runs_t = sa.Table(
+    'score_runs', metadata,
+    sa.Column('id', sa.String(32), primary_key=True),
+    sa.Column('workspace_id', sa.String(80), nullable=False, index=True),
+    sa.Column('model_id', sa.String(32), nullable=False),
+    sa.Column('kind', sa.String(8), nullable=False),               # live (shown to users) | shadow (challenger scored in the background)
+    sa.Column('source', sa.String(16), nullable=False),            # pipeline | batch
+    sa.Column('as_of', sa.String(10)),                             # date the features describe (pipeline runs)
+    sa.Column('horizon_days', sa.Integer),                         # how long until the outcome is known (None: needs uploaded outcomes)
+    sa.Column('scored_at', sa.Float, nullable=False),
+    sa.Column('rows', sa.Integer, nullable=False),
+    sa.Column('status', sa.String(10), nullable=False),            # open | resolved
+    sa.Column('log_key', sa.Text),                                 # encrypted prediction log in blob storage
+    sa.Column('expected', sa.Text),                                # JSON: the model's holdout numbers when it scored
+    sa.Column('realized', sa.Text),                                # JSON: what actually happened, once known
+    sa.Column('resolved_at', sa.Float),
+)
+sa.Index('ix_score_runs_ws_status', score_runs_t.c.workspace_id, score_runs_t.c.status)
+
 usage_t = sa.Table(
     'usage_counters', metadata,
     sa.Column('workspace_id', sa.String(80), primary_key=True),

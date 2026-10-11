@@ -3,6 +3,7 @@ import { $, state, escapeHtml, showToast, fmtInt, humanize, setOverlay, timeAgo,
 import { get, post, patch, runJob } from '../lib/api.js';
 import { loadTeam, initTeam } from './team.js';
 import { loadPipeline, initPipeline } from './pipeline.js';
+import { loadMlops, initMlops } from './mlops.js';
 
 let callbacks = { reloadResults: async () => {}, navigate: () => {} };
 let users = [];
@@ -120,13 +121,14 @@ export async function loadAdminPanel() {
   $('workspace-badge').textContent = state.me.role;
   // Read-only roles can look at settings but not change them.
   document.querySelectorAll('#admin-settings-form input, #admin-settings-form select').forEach(el => { el.disabled = !can('admin'); });
-  await Promise.all([loadRegistry(), loadSettings(), loadDrift(), loadUsers(), loadTeam(), loadPipeline()]);
+  await Promise.all([loadRegistry(), loadSettings(), loadDrift(), loadUsers(), loadTeam(), loadPipeline(), loadMlops()]);
 }
 
 export function initAdmin(cb) {
   callbacks = cb;
   initTeam({ reloadResults: cb.reloadResults });
   initPipeline({ reloadResults: cb.reloadResults });
+  initMlops({ reloadResults: cb.reloadResults });
   $('set-mode').addEventListener('change', syncManualVisibility);
   $('admin-save-settings-btn').addEventListener('click', saveSettings);
   $('admin-refresh-btn').addEventListener('click', loadAdminPanel);

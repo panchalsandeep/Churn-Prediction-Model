@@ -18,7 +18,8 @@ import pandas as pd
 END = pd.Timestamp('2026-09-30')
 
 
-def generate_b2b(n_accounts: int = 500, months: int = 18, seed: int = 3) -> dict:
+def generate_b2b(n_accounts: int = 500, months: int = 18, seed: int = 3, base_logit: float = -4.2) -> dict:
+    """`base_logit` sets the monthly churn hazard before behaviour is considered (-4.2 is about 1.5%; raise it for churnier books)."""
     rng = np.random.default_rng(seed)
     start_month = END - pd.DateOffset(months=months)
     ids = [f'ACME-{i:05d}' for i in range(n_accounts)]
@@ -38,7 +39,7 @@ def generate_b2b(n_accounts: int = 500, months: int = 18, seed: int = 3) -> dict
         for m in month_starts:
             if m < started[i] + pd.Timedelta(days=45):
                 continue
-            logit = (-4.2 - 0.9 * health[i] + 0.8 * unobserved[i] + (0.9 if term_months[i] == 1 else 0.0) - (0.4 if size[i] == 'enterprise' else 0.0))
+            logit = (base_logit - 0.9 * health[i] + 0.8 * unobserved[i] + (0.9 if term_months[i] == 1 else 0.0) - (0.4 if size[i] == 'enterprise' else 0.0))
             if rng.random() < 1 / (1 + np.exp(-logit)):
                 churned_at[i] = (m + pd.Timedelta(days=int(rng.integers(0, 28)))).to_datetime64()
                 break

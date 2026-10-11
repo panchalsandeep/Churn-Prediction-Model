@@ -228,6 +228,15 @@ def test_channel(ws: str, cid: str) -> tuple[bool, str] | None:
     return send_to(ws, ch, {'title': 'ChurnSight test notification', 'text': 'If you can read this, the channel works.', 'count': 0, 'high': 0, 'revenue_at_risk': 0})
 
 
+def broadcast(ws: str, title: str, text: str) -> int:
+    """A system notice (model health, shadow result) to every enabled channel. Never carries account details."""
+    sent = 0
+    for ch in [c for c in _load(ws) if c.get('enabled')]:
+        ok, _ = send_to(ws, ch, {'title': title, 'text': text, 'count': 0, 'high': 0, 'revenue_at_risk': 0})
+        sent += int(ok)
+    return sent
+
+
 def on_new_alerts(ws: str, new_alerts: list[dict]) -> None:
     """Listener registered with service.regenerate_alerts: announce alerts created by this run, once per channel."""
     if not new_alerts:

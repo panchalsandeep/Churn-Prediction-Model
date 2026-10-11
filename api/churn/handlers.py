@@ -32,3 +32,15 @@ def pipeline_train(ws, params, df, progress):
 def pipeline_score(ws, params, df, progress):
     from . import pipeline
     return pipeline.run_score(ws, params.get('actor'), progress)
+
+
+@jobs.handler('mlops_check')
+def mlops_check(ws, params, df, progress):
+    from . import retrain
+    return retrain.run_check(ws, params.get('actor'), progress, bool(params.get('force')))
+
+
+@jobs.handler('backtest')
+def backtest_job(ws, params, df, progress):
+    from . import backtest
+    return backtest.run(ws, progress, int(params.get('origins', 4)), params.get('algorithm', 'logistic_regression'))

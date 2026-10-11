@@ -31,7 +31,7 @@ from churn.tenancy import TenancyError  # noqa: E402
 from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
 from churn.jobs import JobRejected  # noqa: E402
-from churn import apikeys, connectors, features, ingest, notify, pipeline, quotas  # noqa: E402
+from churn import apikeys, connectors, features, ingest, mlops, notify, pipeline, quotas, shadow  # noqa: E402
 from churn.quotas import QuotaExceeded  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
@@ -609,6 +609,106 @@ def api_keys():
 @require_firebase_auth(role='admin')
 def api_key_revoke(key_id):
     return (jsonify({'ok': True}), 200) if apikeys.revoke(g.ws, key_id, g.actor) else bad_request('Key not found', 404)
+
+
+# ── MLOps: realized performance, shadow evaluation, retraining ────────────────
+
+def _run_summary(r: dict) -> dict:
+    rz = r['realized'] or {}
+    return {'id': r['id'], 'model_id': r['model_id'], 'kind': r['kind'], 'source': r['source'], 'as_of': r['as_of'], 'horizon_days': r['horizon_days'],
+            'scored_at': r['scored_at'], 'rows': r['rows'], 'status': r['status'], 'expected': r['expected'],
+            'realized': {k: rz.get(k) for k in ('n', 'positives', 'base_rate', 'roc_auc', 'pr_auc', 'brier', 'lift_top10', 'calibration_ratio', 'ece', 'usable')} if rz else None}
+
+
+@app.route('/api/mlops', methods=['GET'])
+@require_firebase_auth(role='admin')
+def mlops_status():
+    from churn import registry as reg
+    ch = shadow.challenger(g.ws)
+    return jsonify({'health': mlops.stored_health(g.ws), 'policy': shadow.get_policy(g.ws), 'shadow': service.kv_get(g.ws, 'mlops_shadow', None), 'challenger': ch,
+                    'previous_champion': (service.kv_get(g.ws, 'mlops_previous', None) or {}).get('model_id'), 'backtest': service.kv_get(g.ws, 'backtest', None),
+                    'champion': (lambda c: {'id': c['id'], 'created_at': c['created_at'], 'pr_auc': c['pr_auc'], 'roc_auc': c['roc_auc']} if c else None)(reg.champion(g.ws)),
+                    'runs': [_run_summary(r) for r in mlops.list_runs(g.ws, 20)], 'retrains_automatically': bool(pipeline.get(g.ws)['target'])})
+
+
+@app.route('/api/mlops/policy', methods=['PUT'])
+@require_firebase_auth(role='admin')
+def mlops_policy():
+    try:
+        pol = shadow.set_policy(g.ws, request.get_json(silent=True) or {})
+    except ValueError as exc:
+        return bad_request(str(exc))
+    db.audit(g.ws, g.actor, 'mlops.policy', pol)
+    return jsonify(pol)
+
+
+@app.route('/api/mlops/check', methods=['POST'])
+@require_firebase_auth(heavy=True, role='admin')
+def mlops_check_now():
+    body = request.get_json(silent=True) or {}
+    return job_response(jobs.submit(g.ws, 'mlops_check', {'actor': g.actor, 'force': bool(body.get('force')), 'rid': g.rid}, None, request.headers.get('Idempotency-Key')))
+
+
+@app.route('/api/mlops/backtest', methods=['POST'])
+@require_firebase_auth(heavy=True, role='admin')
+def mlops_backtest():
+    body = request.get_json(silent=True) or {}
+    origins = max(2, min(int(body.get('origins', 4)), 8)) if str(body.get('origins', 4)).isdigit() else 4
+    return job_response(jobs.submit(g.ws, 'backtest', {'origins': origins, 'actor': g.actor, 'rid': g.rid}, None, request.headers.get('Idempotency-Key')))
+
+
+@app.route('/api/mlops/rollback', methods=['POST'])
+@require_firebase_auth(role='admin')
+def mlops_rollback():
+    try:
+        return jsonify(shadow.rollback(g.ws, g.actor))
+    except LookupError as exc:
+        return bad_request(str(exc), 404)
+
+
+@app.route('/api/mlops/promote', methods=['POST'])
+@require_firebase_auth(role='admin')
+def mlops_promote():
+    ch = shadow.challenger(g.ws)
+    if not ch:
+        return bad_request('There is no challenger to promote.', 404)
+    return jsonify(shadow.promote(g.ws, ch['id'], g.actor))
+
+
+@app.route('/api/runs', methods=['GET'])
+@require_firebase_auth(role='admin')
+def runs_list():
+    return jsonify({'runs': [_run_summary(r) for r in mlops.list_runs(g.ws, 40)]})
+
+
+@app.route('/api/runs/<run_id>/outcomes', methods=['POST'])
+@require_firebase_auth(role='admin')
+def runs_outcomes(run_id):
+    """Upload what actually happened for a scoring run: a CSV with customer_id and churned (0/1, yes/no, true/false)."""
+    from churn.schema import normalize_target
+    try:
+        df = read_upload()
+        cols = {str(c).strip().lower(): c for c in df.columns}
+        idc, yc = cols.get('customer_id') or cols.get('id'), cols.get('churned') or cols.get('churn') or cols.get('outcome')
+        if not idc or not yc:
+            return bad_request('The file needs two columns: customer_id and churned (0/1).')
+        y = normalize_target(df[yc])
+        ids = df[idc].astype(str)
+        if service.get_settings(g.ws).get('privacy', {}).get('hash_ids'):
+            from churn import crypto
+            ids = ids.map(lambda v: crypto.pseudonymize_id(g.ws, v))
+        outcomes = pd.Series(y.to_numpy(), index=ids.to_numpy())[y.notna().to_numpy()].astype(int)
+        run = mlops.get_run(g.ws, run_id)
+        if not run:
+            return bad_request('Run not found', 404)
+        resolved = [mlops.resolve_run(g.ws, run['id'], outcomes)]
+        for sib in mlops.siblings(g.ws, run):
+            mlops.resolve_run(g.ws, sib['id'], outcomes)
+    except ValueError as exc:
+        return bad_request(str(exc))
+    health = mlops.update_health(g.ws)
+    db.audit(g.ws, g.actor, 'mlops.outcomes', {'run': run_id, 'accounts': int(len(outcomes))})
+    return jsonify({'realized': resolved[0], 'health': health})
 
 
 # ── Training / scoring jobs ───────────────────────────────────────────────────

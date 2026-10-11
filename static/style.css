@@ -2527,3 +2527,8 @@ html.returning #auth-overlay .auth-card { display: none; }
 .pipe-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; font-size: 0.84rem; border-bottom: 1px solid var(--border); }
 .pipe-row small { display: block; }
 #pipe-preview { margin-top: 12px; font-size: 0.84rem; }
+
+/* Phase 4: model operations */
+.file-btn { cursor: pointer; display: inline-block; }
+#mlops-health-text p { margin: 0 0 6px; font-size: 0.84rem; }
+#mlops-shadow p, #mlops-backtest p { margin: 0 0 6px; font-size: 0.84rem; }

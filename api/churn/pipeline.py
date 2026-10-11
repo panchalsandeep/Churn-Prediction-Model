@@ -19,7 +19,7 @@ MAX_EVERY_HOURS = 24.0 * 31
 
 def get(ws: str) -> dict:
     cfg = service.kv_get(ws, 'pipeline', {}) or {}
-    return {'target': cfg.get('target'), 'vocab': cfg.get('vocab'), 'last_run': cfg.get('last_run'), 'trained_at': cfg.get('trained_at')}
+    return {'target': cfg.get('target'), 'vocab': cfg.get('vocab'), 'last_run': cfg.get('last_run'), 'trained_at': cfg.get('trained_at'), 'positives': cfg.get('positives')}
 
 
 def _save(ws: str, **changes) -> dict:
@@ -50,7 +50,7 @@ def status(ws: str) -> dict:
 
 # ── job bodies (registered in handlers.py) ──────────────────────────────────────────────────────────
 
-def run_train(ws: str, actor: str | None, algorithm: str, progress) -> dict:
+def run_train(ws: str, actor: str | None, algorithm: str, progress, challenger_only: bool = False) -> dict:
     cfg = get(ws)
     if not cfg['target']:
         raise ValueError('Define what "churned" means first (target definition).')
@@ -58,14 +58,18 @@ def run_train(ws: str, actor: str | None, algorithm: str, progress) -> dict:
     tables = ingest.load_all(ws)
     try:
         progress('Building point-in-time features', 4)
-        df, info = features.build_training_frame(tables, cfg['target'])
+        df, info = features.build_training_frame(tables, cfg['target'], vocab=cfg['vocab'] if challenger_only else None)
     except features.TargetError as exc:
         raise ValueError(str(exc)) from exc
-    result = service.run_training(ws, df, algorithm, actor, progress, None, 'pipeline', 'churned', None, None)
-    _save(ws, vocab=info['vocab'], trained_at=time.time(),
-          last_run={'kind': 'train', 'at': time.time(), 'rows': info['rows'], 'snapshots': info['snapshots'], 'model_id': result['model_id'], 'status': result['status']})
+    try:
+        today, _ = features.build_scoring_frame(tables, cfg['target'], info['vocab'])       # the population as it looks now: the drift baseline
+    except features.TargetError:
+        today = None
+    result = service.run_training(ws, df, algorithm, actor, progress, False if challenger_only else None, 'retrain' if challenger_only else 'pipeline', 'churned', None, None, today, features.AGING)
+    _save(ws, vocab=info['vocab'], trained_at=time.time(), positives=info['positives'],
+          last_run={'kind': 'retrain' if challenger_only else 'train', 'at': time.time(), 'rows': info['rows'], 'snapshots': info['snapshots'], 'model_id': result['model_id'], 'status': result['status']})
     scored = None
-    if result['status'] == 'champion':
+    if result['status'] == 'champion' and not challenger_only:
         scored = run_score(ws, actor, progress, record=False)
     return {**result, 'features': info, 'scored_today': scored}
 
@@ -83,7 +87,14 @@ def run_score(ws: str, actor: str | None, progress, record: bool = True) -> dict
         df, info = features.build_scoring_frame(tables, cfg['target'], cfg['vocab'])
     except features.TargetError as exc:
         raise ValueError(str(exc)) from exc
-    out = service.run_batch_scoring(ws, df, actor, progress, allow_missing=True)
+    out = service.run_batch_scoring(ws, df, actor, progress, allow_missing=True,
+                                    run_meta={'source': 'pipeline', 'as_of': info['as_of'], 'horizon_days': int(cfg['target']['horizon_days'])})
+    try:                                                         # runs whose horizon has passed now have outcomes in the tables
+        from . import mlops
+        mlops.resolve_due_runs(ws, cfg['target'], tables)
+        mlops.update_health(ws)
+    except Exception:  # noqa: BLE001
+        log.warning('realized-performance update failed', exc_info=True)
     if record:
         _save(ws, last_run={'kind': 'score', 'at': time.time(), 'rows': out['rows'], 'as_of': info['as_of'], 'drift': out['drift'].get('status')})
     failed = [s for s in synced if not s['ok']]
@@ -131,21 +142,21 @@ def tick(now: float | None = None) -> int:
     now = now if now is not None else time.time()
     s, started = db.schedules_t, 0
     with db.system_context(), db.get_engine().connect() as c:
-        due = c.execute(sa.select(s.c.workspace_id, s.c.every_hours, s.c.next_run_at).where(s.c.enabled.is_(True), s.c.next_run_at <= now, s.c.kind == 'pipeline_score')).all()
+        due = c.execute(sa.select(s.c.workspace_id, s.c.kind, s.c.every_hours, s.c.next_run_at).where(s.c.enabled.is_(True), s.c.next_run_at <= now)).all()
     for r in due:
         with db.system_context(), db.get_engine().begin() as c:
-            won = c.execute(sa.update(s).where(s.c.workspace_id == r.workspace_id, s.c.kind == 'pipeline_score', s.c.next_run_at == r.next_run_at)
+            won = c.execute(sa.update(s).where(s.c.workspace_id == r.workspace_id, s.c.kind == r.kind, s.c.next_run_at == r.next_run_at)
                             .values(next_run_at=now + r.every_hours * 3600, updated_at=now)).rowcount
         if won != 1:
             continue                                                     # another worker took it
         status, job_id = 'queued', None
         try:
             with db.workspace_scope(r.workspace_id):
-                job_id = jobs.submit(r.workspace_id, 'pipeline_score', {'actor': 'scheduler'}, None, f'sched-{r.workspace_id}-{int(r.next_run_at)}')
+                job_id = jobs.submit(r.workspace_id, r.kind, {'actor': 'scheduler'}, None, f'sched-{r.kind}-{r.workspace_id}-{int(r.next_run_at)}')
             started += 1
         except Exception as exc:  # noqa: BLE001  (busy, over quota, ...: record why and try again next interval)
             status = f'skipped: {exc}'[:200]
             log.info('scheduled run for %s skipped: %s', r.workspace_id, exc)
         with db.system_context(), db.get_engine().begin() as c:
-            c.execute(sa.update(s).where(s.c.workspace_id == r.workspace_id, s.c.kind == 'pipeline_score').values(last_job_id=job_id, last_status=status))
+            c.execute(sa.update(s).where(s.c.workspace_id == r.workspace_id, s.c.kind == r.kind).values(last_job_id=job_id, last_status=status))
     return started
