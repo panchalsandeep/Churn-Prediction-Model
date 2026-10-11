@@ -183,6 +183,14 @@ invites_t = sa.Table(
     sa.Column('accepted_at', sa.Float),
 )
 
+usage_t = sa.Table(
+    'usage_counters', metadata,
+    sa.Column('workspace_id', sa.String(80), primary_key=True),
+    sa.Column('period', sa.String(7), primary_key=True),          # calendar month, UTC: YYYY-MM
+    sa.Column('metric', sa.String(24), primary_key=True),         # scored_accounts | training_runs | api_calls
+    sa.Column('value', sa.Float, nullable=False, server_default='0'),
+)
+
 keys_t = sa.Table(
     'workspace_keys', metadata,
     sa.Column('workspace_id', sa.String(80), primary_key=True),

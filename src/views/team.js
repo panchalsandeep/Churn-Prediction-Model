@@ -31,6 +31,35 @@ async function loadMembers() {
   $('invite-role').innerHTML = grantable().map(r => `<option value="${r}">${r} · ${ROLE_HELP[r]}</option>`).join('');
 }
 
+const METRIC_LABEL = { scored_accounts: 'Accounts scored', training_runs: 'Training runs', api_calls: 'API calls' };
+
+function meter(label, used, limit, hard) {
+  const pct = limit == null ? 0 : Math.min(100, (used / Math.max(limit, 1)) * 100);
+  const tone = limit != null && used >= limit ? 'High' : pct >= 80 ? 'Medium' : 'Low';
+  return `<div class="meter"><div class="meter-head"><span>${escapeHtml(label)}</span>
+    <b>${fmtInt(used)}${limit == null ? ' · unlimited' : ` / ${fmtInt(limit)}`}</b></div>
+    <div class="meter-bar" role="progressbar" aria-label="${escapeHtml(label)}" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100"><i class="${tone}" style="width:${pct}%"></i></div>
+    ${limit != null && !hard && used > limit ? '<small class="muted">Over the included amount: still served, will be billed as overage.</small>' : ''}</div>`;
+}
+
+async function loadUsage() {
+  const u = await get('/usage');
+  $('usage-sub').textContent = `${u.plan[0].toUpperCase()}${u.plan.slice(1)} plan · resets monthly (${u.period}, UTC). Limits marked hard stop new work; API calls never block.`;
+  const s = u.seats;
+  $('usage-meters').innerHTML = meter('Seats (members + pending invitations)', s.used + s.pending, s.limit, true)
+    + Object.entries(u.metrics).map(([k, m]) => meter(METRIC_LABEL[k] || k, m.used, m.limit, m.hard)).join('')
+    + (u.rows_per_upload ? `<p class="muted">Largest dataset per upload: ${fmtInt(u.rows_per_upload)} rows.</p>` : '');
+}
+
+async function loadPendingInvites() {
+  const { invites } = await get('/invites');
+  const box = $('pending-invites');
+  box.hidden = !invites.length;
+  box.innerHTML = invites.length ? `<h4>Pending invitations</h4><ul>${invites.map(i => `
+    <li><span>${escapeHtml(i.email)} · ${escapeHtml(i.role)}</span><small>expires ${new Date(i.expires_at * 1000).toLocaleDateString()}</small>
+    <button class="btn-danger btn-small" data-revoke="${escapeHtml(i.id)}" type="button">Revoke</button></li>`).join('')}</ul>` : '';
+}
+
 async function loadAudit() {
   const { events, chain } = await get('/audit');
   const badge = $('chain-badge');
@@ -43,7 +72,7 @@ async function loadAudit() {
 
 export async function loadTeam() {
   const tasks = [];
-  if (can('admin')) tasks.push(loadMembers(), loadAudit());
+  if (can('admin')) tasks.push(loadMembers(), loadAudit(), loadUsage(), loadPendingInvites());
   $('sso-required').checked = !!state.me.workspace?.sso_required;
   try { await Promise.all(tasks); } catch (err) { showToast(err.message, 'error'); }
 }
@@ -68,8 +97,19 @@ export function initTeam({ reloadResults }) {
       showInvite(await post('/invites', { email: $('invite-email').value, role: $('invite-role').value }));
       $('invite-email').value = '';
       loadAudit();
+      loadUsage().catch(() => {});
+      loadPendingInvites().catch(() => {});
     } catch (err) { showToast(err.message, 'error'); }
   });
+
+  $('pending-invites').addEventListener('click', async e => {
+    const b = e.target.closest('[data-revoke]');
+    if (!b) return;
+    try { await request(`/invites/${encodeURIComponent(b.dataset.revoke)}`, { method: 'DELETE' }); showToast('Invitation revoked.'); loadPendingInvites(); loadUsage(); loadAudit(); }
+    catch (err) { showToast(err.message, 'error'); }
+  });
+
+  $('usage-export').addEventListener('click', () => download('/usage/export', 'usage.csv').catch(err => showToast(err.message, 'error')));
 
   $('members-body').addEventListener('change', async e => {
     const sel = e.target.closest('.role-select');

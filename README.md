@@ -42,6 +42,9 @@ Anything tabular with a churn label. Best results come from behavioural features
 | POST | `/api/upload` · `/api/demo` | Train (async job; `?wait=1` blocks) |
 | POST | `/api/score` | Score a new batch with the champion, report drift |
 | GET · POST | `/api/jobs/<id>` · `/api/jobs/<id>/cancel` | Job stage and progress; cancel (admin). Send `Idempotency-Key` on POST to de-duplicate retries |
+| GET | `/api/usage` · `/api/usage/export` | Plan, seats, monthly usage against limits (admin); usage CSV for billing |
+| GET · DELETE | `/api/invites` · `/api/invites/<id>` | Pending invitations; revoke one (frees its seat) |
+| PUT | `/api/platform/workspaces/<id>/plan` | Platform admin only: set a workspace's plan |
 | GET | `/api/health` · `/api/ready` · `/metrics` | Liveness; readiness (db, schema, storage, keys); Prometheus (needs `METRICS_TOKEN` as a Bearer header) |
 | GET | `/api/results` | Metrics, charts data, cohorts, segments, summary (no customer list) |
 | GET | `/api/customers` | Server-side paging: `tier, q, sort, dir, page, limit` |

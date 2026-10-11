@@ -22,7 +22,7 @@ def test_fresh_database_reaches_head_with_no_drift_from_the_models(tmp_path):
         diffs = compare_metadata(MigrationContext.configure(conn, opts={'compare_type': True}), db.metadata)
         version = conn.execute(sa.text('SELECT version_num FROM alembic_version')).scalar()
     assert diffs == [], f'models and migrations disagree: {diffs}'
-    assert version == '0005'
+    assert version == '0006'
     tables = set(sa.inspect(engine).get_table_names())
     assert {'workspaces', 'memberships', 'invites', 'workspace_keys', 'audit_log', 'customers'} <= tables
 
@@ -65,7 +65,7 @@ def test_a_database_made_by_the_old_create_all_is_adopted_without_data_loss(tmp_
     with engine.connect() as conn:
         assert conn.execute(sa.text("SELECT id FROM models")).scalar() == 'm1'                         # data survived
         assert conn.execute(sa.text("SELECT action FROM audit_log")).scalar() == 'old.event'
-        assert conn.execute(sa.text('SELECT version_num FROM alembic_version')).scalar() == '0005'
+        assert conn.execute(sa.text('SELECT version_num FROM alembic_version')).scalar() == '0006'
     with engine.begin() as conn:                                                                        # and the log is now protected
         with pytest.raises(Exception, match='append-only'):
             conn.execute(sa.text("UPDATE audit_log SET actor = 'x'"))

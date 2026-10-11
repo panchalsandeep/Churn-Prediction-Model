@@ -75,6 +75,8 @@ On tabular customer snapshots of this size, gradient-boosted trees match or beat
 | Backup | `python -m churn.backup backup/verify/restore` (SQLite + local blobs; Postgres via `pg_dump`). The master key is never in a backup: store it separately. |
 | Deployment | `docker-compose.yml` (web, worker, Postgres, Redis) and `deploy/k8s/churnsight.yaml` (web and worker deployments, HPAs, PDBs, ingress, network policy). Neither has been run: see docs/BENCHMARKS.md for what was verified. |
 
+| Plans and metering | `quotas.py`: a workspace's plan (`workspaces.plan`) sets seats, monthly scored accounts, training runs, API calls and upload size. Counters live in `usage_counters` (one row per workspace, month and metric, atomic upsert; API calls are batched in memory and flushed every few seconds). Jobs are checked before they are accepted (402 `quota_exceeded`) and charged only when they succeed; the demo dataset is free. API calls are measured but never blocked. |
+
 SQLite remains the zero-setup default; use Postgres (`DATABASE_URL`) for anything shared across hosts.
 
 ## More than one way to look at churn

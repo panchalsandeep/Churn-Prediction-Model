@@ -31,6 +31,8 @@ from churn.tenancy import TenancyError  # noqa: E402
 from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
 from churn.jobs import JobRejected  # noqa: E402
+from churn import quotas  # noqa: E402
+from churn.quotas import QuotaExceeded  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
 from churn.security import SECURITY_HEADERS, limiter  # noqa: E402
@@ -166,6 +168,7 @@ def require_firebase_auth(f=None, *, heavy: bool = False, role: str = 'viewer', 
                     return resp
                 g.ws, g.role, g.uid, g.email = ctx['ws'], ctx['role'], ctx['uid'], ctx['email']
                 g.actor = user.get('email') or 'local-dev'
+                quotas.record(g.ws, 'api_calls', 1, buffered=True)
                 db.workspace_context.set(g.ws)       # row-level security scope for everything this request does
             return fn(*args, **kwargs)
         return decorated
@@ -252,6 +255,11 @@ def _job_rejected(exc):
     if exc.status == 503:
         resp.headers['Retry-After'] = '60'
     return resp
+
+
+@app.errorhandler(QuotaExceeded)
+def _quota_exceeded(exc):
+    return jsonify({'error': str(exc), 'code': exc.code, 'metric': exc.metric, 'limit': exc.limit, 'used': exc.used}), exc.status
 
 
 @app.errorhandler(ArtifactError)
@@ -726,6 +734,38 @@ def me():
                     'seats': tenancy.seat_count(g.ws), 'platform_admin': bool(request.user and is_admin_token(request.user))})
 
 
+@app.route('/api/usage', methods=['GET'])
+@require_firebase_auth(role='admin')
+def usage_summary():
+    return jsonify(quotas.summary(g.ws))
+
+
+@app.route('/api/usage/export', methods=['GET'])
+@require_firebase_auth(role='admin')
+def usage_export():
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(['workspace', 'period', 'metric', 'value'])
+    for r in quotas.export_rows(g.ws):
+        w.writerow([g.ws, r['period'], r['metric'], r['value']])
+    return Response(buf.getvalue(), mimetype='text/csv', headers={'Content-Disposition': 'attachment; filename=usage.csv'})
+
+
+@app.route('/api/platform/workspaces/<ws_id>/plan', methods=['PUT'])
+@require_admin
+def platform_set_plan(ws_id):
+    plan = (request.get_json(silent=True) or {}).get('plan', '')
+    if plan not in quotas.plans() or plan == 'dev':
+        return bad_request('Unknown plan. Choose one of: ' + ', '.join(p for p in quotas.plans() if p != 'dev'))
+    if not tenancy.get_workspace(ws_id):
+        return bad_request('Workspace not found', 404)
+    tenancy.set_plan(ws_id, plan)
+    quotas.forget_plans()
+    with db.system_context():
+        db.audit(ws_id, g.actor, 'workspace.plan', {'plan': plan})
+    return jsonify({'workspace': ws_id, 'plan': plan})
+
+
 @app.route('/api/members', methods=['GET'])
 @require_firebase_auth(role='admin')
 def members_list():
@@ -748,6 +788,20 @@ def invites_create():
     body = request.get_json(silent=True) or {}
     invite = tenancy.create_invite(g.ws, body.get('email', ''), body.get('role', 'viewer'), g.role, g.actor)
     return jsonify(invite), 201          # the token is shown once; only its hash is stored
+
+
+@app.route('/api/invites', methods=['GET'])
+@require_firebase_auth(role='admin')
+def invites_list():
+    return jsonify({'invites': tenancy.list_invites(g.ws)})
+
+
+@app.route('/api/invites/<invite_id>', methods=['DELETE'])
+@require_firebase_auth(role='admin')
+def invites_revoke(invite_id):
+    if not tenancy.revoke_invite(g.ws, invite_id, g.role, g.actor):
+        return bad_request('Invitation not found', 404)
+    return jsonify({'ok': True})
 
 
 @app.route('/api/invites/accept', methods=['POST'])

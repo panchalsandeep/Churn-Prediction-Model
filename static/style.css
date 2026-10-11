@@ -2500,3 +2500,18 @@ html.returning #auth-overlay .auth-card { display: none; }
 .gate-invite input { padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-1); }
 #access-gate { z-index: 10001; display: none; }
 #access-gate:not([hidden]) { display: flex; }
+
+/* Phase 2: plan & usage */
+.usage-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px 24px; padding: 4px 24px 22px; }
+.usage-meters .muted { grid-column: 1 / -1; font-size: 0.8rem; }
+.meter-head { display: flex; justify-content: space-between; gap: 8px; font-size: 0.82rem; color: var(--text-2); margin-bottom: 6px; }
+.meter-head b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+.meter-bar { height: 8px; border-radius: 99px; background: var(--input-bg); overflow: hidden; }
+.meter-bar i { display: block; height: 100%; border-radius: 99px; background: var(--green); transition: width 0.6s var(--ease, ease); }
+.meter-bar i.Medium { background: var(--orange); }
+.meter-bar i.High { background: var(--red); }
+.pending-invites { padding: 0 24px 14px; }
+.pending-invites h4 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-2); margin-bottom: 6px; }
+.pending-invites ul { list-style: none; display: grid; gap: 6px; padding: 0; margin: 0; }
+.pending-invites li { display: flex; align-items: center; gap: 12px; font-size: 0.84rem; }
+.pending-invites li small { color: var(--text-3, var(--text-2)); margin-left: auto; }

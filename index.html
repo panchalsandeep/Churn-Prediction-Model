@@ -618,7 +618,14 @@
         <div id="invite-result" class="invite-result" hidden></div>
         <div class="table-wrapper"><table class="customer-table"><thead><tr><th>Member</th><th>Role</th><th>Since</th><th></th></tr></thead>
           <tbody id="members-body"></tbody></table></div>
+        <div id="pending-invites" class="pending-invites" hidden></div>
         <div class="sso-row" data-min-role="owner"><label><input type="checkbox" id="sso-required" /> Require single sign-on (SAML / OIDC) for this workspace. Password logins are refused.</label></div>
+      </div>
+
+      <div class="card admin-card admin-wide" id="usage-card" data-min-role="admin">
+        <div class="table-card-header"><div><h3>Plan &amp; usage</h3><p id="usage-sub">Loading…</p></div>
+          <button class="btn-secondary btn-small" id="usage-export" type="button">Export usage (CSV)</button></div>
+        <div id="usage-meters" class="usage-meters"></div>
       </div>
 
       <div class="card table-card admin-card admin-wide">

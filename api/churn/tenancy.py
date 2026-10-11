@@ -142,6 +142,8 @@ def create_invite(ws: str, email: str, role: str, creator_role: str, creator: st
         raise TenancyError('Unknown role.')
     if not _may_manage(creator_role, 'viewer', role):
         raise TenancyError('You cannot invite someone to this role.', 403, 'forbidden')
+    from . import quotas
+    quotas.check_seat(ws)
     token = secrets.token_urlsafe(32)
     now = time.time()
     with db.get_engine().begin() as c:
@@ -149,6 +151,27 @@ def create_invite(ws: str, email: str, role: str, creator_role: str, creator: st
                                                created_at=now, expires_at=now + INVITE_TTL_DAYS * 86400))
     db.audit(ws, creator, 'invite.create', {'email': email, 'role': role})
     return {'token': token, 'email': email, 'role': role, 'expires_at': now + INVITE_TTL_DAYS * 86400}
+
+
+def list_invites(ws: str) -> list[dict]:
+    inv = db.invites_t
+    with db.get_engine().connect() as c:
+        rows = c.execute(sa.select(inv).where(inv.c.workspace_id == ws, inv.c.accepted_at.is_(None), inv.c.expires_at > time.time())
+                         .order_by(inv.c.created_at)).all()
+    return [{'id': r.token_hash[:16], 'email': r.email, 'role': r.role, 'created_by': r.created_by, 'expires_at': r.expires_at} for r in rows]
+
+
+def revoke_invite(ws: str, invite_id: str, creator_role: str, actor: str | None) -> bool:
+    inv = db.invites_t
+    with db.get_engine().begin() as c:
+        row = c.execute(sa.select(inv).where(inv.c.workspace_id == ws, inv.c.accepted_at.is_(None), inv.c.token_hash.like(invite_id + '%'))).first()             if len(invite_id) >= 16 else None
+        if not row:
+            return False
+        if not _may_manage(creator_role, 'viewer', row.role):
+            raise TenancyError('You cannot revoke an invitation for this role.', 403, 'forbidden')
+        c.execute(sa.delete(inv).where(inv.c.token_hash == row.token_hash))
+    db.audit(ws, actor, 'invite.revoke', {'email': row.email})
+    return True
 
 
 def accept_invite(token: str, uid: str, email: str | None) -> dict:
@@ -173,6 +196,11 @@ def accept_invite(token: str, uid: str, email: str | None) -> dict:
         c.execute(sa.update(inv).where(inv.c.token_hash == row.token_hash).values(accepted_at=now))
     db.audit(row.workspace_id, email, 'invite.accept', {'role': row.role})
     return {'workspace_id': row.workspace_id, 'role': row.role}
+
+
+def set_plan(ws: str, plan: str) -> None:
+    with db.system_context(), db.get_engine().begin() as c:
+        c.execute(sa.update(db.workspaces_t).where(db.workspaces_t.c.id == ws).values(plan=plan))
 
 
 def set_sso_required(ws: str, required: bool, actor: str | None) -> None:

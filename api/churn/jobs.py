@@ -29,7 +29,7 @@ from typing import Callable
 import pandas as pd
 import sqlalchemy as sa
 
-from . import config, crypto, db, storage
+from . import config, crypto, db, quotas, storage
 
 log = logging.getLogger('churnsight.jobs')
 
@@ -98,8 +98,11 @@ def submit(ws: str, kind: str, params: dict | None = None, df: pd.DataFrame | No
     key = (idempotency_key or '').strip()[:80] or None
     if key and (existing := _by_key(ws, key)):
         return existing
+    rows = int(len(df)) if df is not None else int((params or {}).get('rows') or 0) or None
+    quotas.check_job(ws, kind, rows)
     _admit(ws)
     job_id = db.new_id()
+    params = {**(params or {}), '_rows': rows}
     input_key = _put_input(ws, job_id, df) if df is not None else None
     try:
         with db.get_engine().begin() as c:
@@ -227,7 +230,8 @@ def execute(job: dict, worker: str) -> None:
                 raise JobCancelled('cancelled')
             df = _load_input(ws, job_id, input_key) if input_key else None
             result = HANDLERS[kind](ws, db.loads(job.get('params')) or {}, df, progress)
-        _finish(job_id, worker, status='done', stage='Done', progress=100, result=db.dumps(result), finished_at=time.time())
+        if _finish(job_id, worker, status='done', stage='Done', progress=100, result=db.dumps(result), finished_at=time.time()):
+            quotas.on_job_success(ws, kind, (db.loads(job.get('params')) or {}).get('_rows'))
     except JobCancelled:
         if why.get('r') not in ('timeout', 'lost'):
             _finish(job_id, worker, status='cancelled', stage='Cancelled', error='Cancelled.', finished_at=time.time())

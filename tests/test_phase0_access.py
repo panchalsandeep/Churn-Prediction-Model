@@ -58,6 +58,7 @@ def make_team(client, auth):
     res = client.post('/api/workspaces', json={'name': f'Acme {n}', 'owner_email': boss_email}, headers=root)
     assert res.status_code == 201, res.get_json()
     ws, token = res.get_json()['workspace_id'], res.get_json()['invite']['token']
+    assert client.put(f'/api/platform/workspaces/{ws}/plan', json={'plan': 'enterprise'}, headers=root).status_code == 200   # no seat cap in these tests
     boss = auth.token(f'boss{n}', boss_email)
     assert client.post('/api/invites/accept', json={'token': token}, headers=boss).status_code == 200
     people = {}
