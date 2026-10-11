@@ -24,6 +24,7 @@ def erase_customers(ws: str, ids: list[str], actor: str | None) -> dict:
     with db.get_engine().begin() as c:
         for chunk in (ids[i:i + 500] for i in range(0, len(ids), 500)):
             erased += c.execute(sa.delete(db.customers_t).where(db.customers_t.c.workspace_id == ws, db.customers_t.c.customer_id.in_(chunk))).rowcount
+            c.execute(sa.delete(db.details_t).where(db.details_t.c.workspace_id == ws, db.details_t.c.customer_id.in_(chunk)))
             c.execute(sa.delete(db.alerts_t).where(db.alerts_t.c.workspace_id == ws, db.alerts_t.c.customer_id.in_(chunk)))
             c.execute(sa.delete(db.interventions_t).where(db.interventions_t.c.workspace_id == ws, db.interventions_t.c.customer_id.in_(chunk)))
     rewritten = 0

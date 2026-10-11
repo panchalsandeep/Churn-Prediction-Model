@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 
-from . import config, crypto, db, economics, registry, training
+from . import config, crypto, db, economics, registry, storage, training
 from .config import data_dir
 from .schema import prepare_features
 
@@ -264,18 +264,24 @@ def persist_scores(ws: str, model_id: str, scored: pd.DataFrame) -> None:
         prev = {r.customer_id: r.prob for r in conn.execute(
             sa.select(db.customers_t.c.customer_id, db.customers_t.c.prob).where(db.customers_t.c.workspace_id == ws))}
         conn.execute(sa.delete(db.customers_t).where(db.customers_t.c.workspace_id == ws))
-        rows = []
+        conn.execute(sa.delete(db.details_t).where(db.details_t.c.workspace_id == ws))
+        rows, details = [], []
         for r in scored.itertuples(index=False):
             rows.append({
                 'workspace_id': ws, 'customer_id': r.customer_id, 'model_id': model_id, 'prob': float(r.prob),
                 'prev_prob': prev.get(r.customer_id), 'tier': r.tier, 'revenue': float(r.revenue),
                 'tenure': None if pd.isna(r.tenure) else float(r.tenure), 'activity': None if pd.isna(r.activity) else float(r.activity),
                 'expected_loss': float(r.expected_loss), 'actual': None if pd.isna(r.actual) else int(r.actual),
-                'top_driver': _text(r.top_driver), 'reasons': crypto.encrypt_text(ws, _text(r.reasons), _fctx(r.customer_id, 'reasons')),
+                'top_driver': _text(r.top_driver),
+            })
+            details.append({
+                'workspace_id': ws, 'customer_id': r.customer_id,
+                'reasons': crypto.encrypt_text(ws, _text(r.reasons), _fctx(r.customer_id, 'reasons')),
                 'attrs': crypto.encrypt_text(ws, _text(r.attrs), _fctx(r.customer_id, 'attrs')),
             })
         for i in range(0, len(rows), 5000):
             conn.execute(db.customers_t.insert(), rows[i:i + 5000])
+            conn.execute(db.details_t.insert(), details[i:i + 5000])
     refresh_counts(ws)
 
 
@@ -311,17 +317,14 @@ def save_snapshot(ws: str, model_id: str, scored: pd.DataFrame) -> str:
     buf = io.BytesIO()
     with gzip.GzipFile(fileobj=buf, mode='wb', compresslevel=3) as gz:
         gz.write(scored.to_csv(index=False).encode())
-    path = os.path.join(registry.model_dir(ws, model_id), 'customers.cse')
-    with open(path, 'wb') as f:
-        f.write(crypto.encrypt_bytes(ws, buf.getvalue(), f'snapshot|{model_id}'))
-    return path
+    key = f'{storage.model_prefix(ws, model_id)}/customers.cse'
+    return storage.get_storage().put(key, crypto.encrypt_bytes(ws, buf.getvalue(), f'snapshot|{model_id}'))
 
 
 def load_snapshot(ws: str, model_id: str, path: str) -> pd.DataFrame:
     import gzip
     import io
-    with open(path, 'rb') as f:
-        raw = gzip.decompress(crypto.decrypt_bytes(ws, f.read(), f'snapshot|{model_id}'))
+    raw = gzip.decompress(crypto.decrypt_bytes(ws, storage.get_storage().get(path), f'snapshot|{model_id}'))
     df = pd.read_csv(io.BytesIO(raw), keep_default_na=True)
     for c in ('reasons', 'top_driver', 'attrs'):
         df[c] = df[c].where(df[c].notna(), None)
@@ -344,8 +347,10 @@ def regenerate_alerts(ws: str, settings: dict) -> int:
     cu = db.customers_t
     desired: dict[tuple[str, str], dict] = {}
     with db.get_engine().begin() as conn:
+        dt = db.details_t
+        join = cu.outerjoin(dt, sa.and_(dt.c.workspace_id == cu.c.workspace_id, dt.c.customer_id == cu.c.customer_id))
         if rules['high_risk']['enabled']:
-            for r in conn.execute(sa.select(cu).where(cu.c.workspace_id == ws, cu.c.tier == 'High')
+            for r in conn.execute(sa.select(cu, dt.c.reasons).select_from(join).where(cu.c.workspace_id == ws, cu.c.tier == 'High')
                                   .order_by(cu.c.expected_loss.desc()).limit(MAX_ALERTS)):
                 desired[(r.customer_id, 'high_risk')] = {
                     'severity': 'High', 'title': f'High churn risk ({r.prob * 100:.0f}%)',
@@ -353,7 +358,7 @@ def regenerate_alerts(ws: str, settings: dict) -> int:
                     'signals': _signals(_open(ws, r.customer_id, 'reasons', r.reasons)), 'expected_loss': r.expected_loss}
         if rules['risk_jump']['enabled']:
             delta = float(rules['risk_jump'].get('delta', 0.15))
-            q = sa.select(cu).where(cu.c.workspace_id == ws, cu.c.prev_prob.is_not(None), (cu.c.prob - cu.c.prev_prob) >= delta) \
+            q = sa.select(cu, dt.c.reasons).select_from(join).where(cu.c.workspace_id == ws, cu.c.prev_prob.is_not(None), (cu.c.prob - cu.c.prev_prob) >= delta) \
                 .order_by((cu.c.prob - cu.c.prev_prob).desc()).limit(100)
             for r in conn.execute(q):
                 desired.setdefault((r.customer_id, 'risk_jump'), {
@@ -442,10 +447,11 @@ def refresh_segments(ws: str, bundle: dict) -> list[dict]:
     if not cats:
         kv_set(ws, 'segments', [])
         return []
-    cu = db.customers_t
+    cu, dt = db.customers_t, db.details_t
     recs = []
     with db.get_engine().connect() as c:
-        for r in c.execute(sa.select(cu.c.customer_id, cu.c.prob, cu.c.expected_loss, cu.c.tier, cu.c.attrs).where(cu.c.workspace_id == ws)):
+        join = cu.join(dt, sa.and_(dt.c.workspace_id == cu.c.workspace_id, dt.c.customer_id == cu.c.customer_id))
+        for r in c.execute(sa.select(cu.c.customer_id, cu.c.prob, cu.c.expected_loss, cu.c.tier, dt.c.attrs).select_from(join).where(cu.c.workspace_id == ws)):
             attrs = _open(ws, r.customer_id, 'attrs', r.attrs) or {}
             rec = {'prob': r.prob, 'expected_loss': r.expected_loss, 'tier': r.tier}
             for k in cats:
@@ -511,7 +517,10 @@ def query_customers(ws: str, tier: str | None = None, q: str | None = None, sort
             cond.append(sa.and_(cu.c.customer_id >= q, cu.c.customer_id < q + '\uffff'))   # case-sensitive prefix: uses the primary-key index
         else:
             like = f'%{needle}%'
-            attr_match = [] if config.ENCRYPT_FIELDS else [sa.func.lower(sa.func.coalesce(cu.c.attrs, '')).like(like)]   # ciphertext can't be searched
+            dt = db.details_t
+            attr_match = [] if config.ENCRYPT_FIELDS else [sa.exists().where(
+                dt.c.workspace_id == cu.c.workspace_id, dt.c.customer_id == cu.c.customer_id,
+                sa.func.lower(sa.func.coalesce(dt.c.attrs, '')).like(like))]   # ciphertext can't be searched
             cond.append(sa.or_(sa.func.lower(cu.c.customer_id).like(like), *attr_match,
                                sa.func.lower(sa.func.coalesce(cu.c.top_driver, '')).like(like)))
     if ids:
@@ -535,10 +544,11 @@ def customer_detail(ws: str, customer_id: str) -> dict | None:
     cu = db.customers_t
     with db.get_engine().connect() as c:
         r = c.execute(sa.select(cu).where(cu.c.workspace_id == ws, cu.c.customer_id == customer_id)).first()
+        d = c.execute(sa.select(db.details_t).where(db.details_t.c.workspace_id == ws, db.details_t.c.customer_id == customer_id)).first()
     if not r:
         return None
-    attrs = _open(ws, customer_id, 'attrs', r.attrs) or {}
-    reasons = _open(ws, customer_id, 'reasons', r.reasons)
+    attrs = _open(ws, customer_id, 'attrs', d.attrs if d else None) or {}
+    reasons = _open(ws, customer_id, 'reasons', d.reasons if d else None)
     if reasons is None and attrs:             # beyond the pre-computed top-N: explain on demand
         row, bundle = registry.champion_bundle(ws)
         if bundle:
@@ -853,7 +863,7 @@ def promote_model(ws: str, model_id: str, actor: str | None) -> dict:
         raise LookupError('Model not found')
     bundle = registry.load_bundle(ws, model_id)
     snapshot = target.get('data_path')
-    if bundle and snapshot and os.path.exists(snapshot):
+    if bundle and snapshot and storage.get_storage().exists(snapshot):
         settings = get_settings(ws)
         scored = load_snapshot(ws, model_id, snapshot)
         thresholds = effective_thresholds(settings, bundle)

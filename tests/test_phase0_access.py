@@ -334,7 +334,7 @@ def test_personal_data_columns_are_detected_unused_and_never_stored(client, env,
     attrs = client.get(f'/api/customers/{top}', headers=team['adam']).get_json()['attrs']
     assert not ({'contact_email', 'phone_number', 'first_name', 'notes_internal'} & set(attrs))
     with db.get_engine().connect() as c:
-        blob = ' '.join(r.attrs or '' for r in c.execute(sa.select(db.customers_t.c.attrs).where(db.customers_t.c.workspace_id == ws).limit(50)))
+        blob = ' '.join(r.attrs or '' for r in c.execute(sa.select(db.details_t.c.attrs).where(db.details_t.c.workspace_id == ws).limit(50)))
     assert 'example.com' not in blob and 'confidential' not in blob
     model = client.get('/api/model/schema', headers=team['adam']).get_json()
     assert not any(f['name'] in ('contact_email', 'phone_number', 'first_name') for f in model['fields'])

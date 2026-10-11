@@ -56,6 +56,12 @@ customers_t = sa.Table(
     sa.Column('expected_loss', sa.Float, index=True),
     sa.Column('actual', sa.Integer),
     sa.Column('top_driver', sa.String(120)),
+)
+# Wide (encrypted) per-customer blobs live apart from the hot table; read by key only.
+details_t = sa.Table(
+    'customer_details', metadata,
+    sa.Column('workspace_id', sa.String(80), primary_key=True),
+    sa.Column('customer_id', sa.String(120), primary_key=True),
     sa.Column('reasons', sa.Text),
     sa.Column('attrs', sa.Text),
 )

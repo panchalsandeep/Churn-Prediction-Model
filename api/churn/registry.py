@@ -1,16 +1,15 @@
-"""Model registry: versioned artifacts on disk, metadata in the database, champion/challenger."""
+"""Model registry: versioned artifacts in blob storage, metadata in the database, champion/challenger."""
 from __future__ import annotations
 
-import os
 import re
-import shutil
 import threading
 import time
 from collections import OrderedDict
 
 import sqlalchemy as sa
 
-from . import artifacts, config, crypto, db
+from . import artifacts, config, crypto, db, storage
+
 KEEP_MODELS = config.KEEP_MODELS
 
 _cache: OrderedDict[tuple[str, str], dict] = OrderedDict()
@@ -22,18 +21,10 @@ def safe(ws: str) -> str:
     return re.sub(r'[^A-Za-z0-9_.-]', '_', ws)[:80]
 
 
-def model_dir(ws: str, model_id: str) -> str:
-    path = os.path.join(config.data_dir(), 'models', safe(ws), model_id)
-    os.makedirs(path, exist_ok=True)
-    return path
-
-
 def save_bundle(ws: str, model_id: str, bundle: dict) -> str:
     """Safe (non-pickle) format, encrypted with the workspace key and bound to this workspace and model id."""
-    path = os.path.join(model_dir(ws, model_id), 'model.cse')
-    with open(path, 'wb') as f:
-        f.write(crypto.encrypt_bytes(ws, artifacts.dumps_bundle(bundle), f'model|{model_id}'))
-    return path
+    key = f'{storage.model_prefix(ws, model_id)}/model.cse'
+    return storage.get_storage().put(key, crypto.encrypt_bytes(ws, artifacts.dumps_bundle(bundle), f'model|{model_id}'))
 
 
 def load_bundle(ws: str, model_id: str) -> dict | None:
@@ -43,12 +34,15 @@ def load_bundle(ws: str, model_id: str) -> dict | None:
             _cache.move_to_end(key)
             return _cache[key]
     row = get_model(ws, model_id)
-    if not row or not row['artifact_path'] or not os.path.exists(row['artifact_path']):
+    if not row or not row['artifact_path']:
         return None
     if not row['artifact_path'].endswith('.cse'):
         raise artifacts.ArtifactError('This model uses the legacy pickle format, which is no longer loaded. Retrain it.')
-    with open(row['artifact_path'], 'rb') as f:
-        bundle = artifacts.loads_bundle(crypto.decrypt_bytes(ws, f.read(), f'model|{model_id}'))
+    try:
+        blob = storage.get_storage().get(row['artifact_path'])
+    except (FileNotFoundError, storage.StorageError):
+        return None
+    bundle = artifacts.loads_bundle(crypto.decrypt_bytes(ws, blob, f'model|{model_id}'))
     with _cache_lock:
         _cache[key] = bundle
         while len(_cache) > CACHE_SIZE:
@@ -152,14 +146,15 @@ def _prune(ws: str) -> None:
             if r.status == 'champion':
                 continue
             conn.execute(sa.delete(db.models_t).where(db.models_t.c.id == r.id))
-            shutil.rmtree(model_dir(ws, r.id), ignore_errors=True)
+            storage.get_storage().delete_prefix(storage.model_prefix(ws, r.id))
             with _cache_lock:
                 _cache.pop((ws, r.id), None)
 
 
 def wipe(ws: str) -> None:
     with db.get_engine().begin() as conn:
-        for t in (db.models_t, db.customers_t, db.alerts_t, db.interventions_t, db.jobs_t, db.score_batches_t, db.kv_t):
+        for t in (db.models_t, db.customers_t, db.details_t, db.alerts_t, db.interventions_t, db.jobs_t, db.score_batches_t, db.kv_t):
             conn.execute(sa.delete(t).where(t.c.workspace_id == ws))
-    shutil.rmtree(os.path.join(config.data_dir(), 'models', safe(ws)), ignore_errors=True)
+    storage.get_storage().delete_prefix(storage.model_prefix(ws))
+    storage.get_storage().delete_prefix(storage.upload_prefix(ws))
     forget(ws)

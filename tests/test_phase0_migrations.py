@@ -22,7 +22,7 @@ def test_fresh_database_reaches_head_with_no_drift_from_the_models(tmp_path):
         diffs = compare_metadata(MigrationContext.configure(conn, opts={'compare_type': True}), db.metadata)
         version = conn.execute(sa.text('SELECT version_num FROM alembic_version')).scalar()
     assert diffs == [], f'models and migrations disagree: {diffs}'
-    assert version == '0003'
+    assert version == '0004'
     tables = set(sa.inspect(engine).get_table_names())
     assert {'workspaces', 'memberships', 'invites', 'workspace_keys', 'audit_log', 'customers'} <= tables
 
@@ -65,10 +65,35 @@ def test_a_database_made_by_the_old_create_all_is_adopted_without_data_loss(tmp_
     with engine.connect() as conn:
         assert conn.execute(sa.text("SELECT id FROM models")).scalar() == 'm1'                         # data survived
         assert conn.execute(sa.text("SELECT action FROM audit_log")).scalar() == 'old.event'
-        assert conn.execute(sa.text('SELECT version_num FROM alembic_version')).scalar() == '0003'
+        assert conn.execute(sa.text('SELECT version_num FROM alembic_version')).scalar() == '0004'
     with engine.begin() as conn:                                                                        # and the log is now protected
         with pytest.raises(Exception, match='append-only'):
             conn.execute(sa.text("UPDATE audit_log SET actor = 'x'"))
+
+
+def test_0004_moves_wide_columns_to_customer_details_without_losing_rows(tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    engine = new_engine(tmp_path, 'split.db')
+    cfg = Config()
+    cfg.set_main_option('script_location', db._MIGRATIONS_DIR)
+    with engine.begin() as conn:
+        cfg.attributes['connection'] = conn
+        command.upgrade(cfg, '0003')
+        conn.exec_driver_sql("INSERT INTO customers (workspace_id, customer_id, model_id, prob, tier, reasons, attrs) "
+                             "VALUES ('w','c1','m',0.5,'High','R1','A1'), ('w','c2','m',0.1,'Low',NULL,'A2')")
+    with engine.begin() as conn:
+        cfg.attributes['connection'] = conn
+        command.upgrade(cfg, '0004')
+    with engine.connect() as conn:
+        assert {c['name'] for c in sa.inspect(conn).get_columns('customers')}.isdisjoint({'attrs', 'reasons'})
+        rows = {r[0]: (r[1], r[2]) for r in conn.exec_driver_sql('SELECT customer_id, reasons, attrs FROM customer_details')}
+        assert rows == {'c1': ('R1', 'A1'), 'c2': (None, 'A2')}
+        assert conn.exec_driver_sql('SELECT COUNT(*) FROM customers').scalar() == 2
+    with engine.begin() as conn:                                  # and it can be reversed
+        cfg.attributes['connection'] = conn
+        command.downgrade(cfg, '0003')
+        assert conn.exec_driver_sql("SELECT attrs FROM customers WHERE customer_id='c1'").scalar() == 'A1'
 
 
 def test_pre_chain_audit_entries_do_not_break_verification(env):

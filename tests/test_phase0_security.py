@@ -125,27 +125,27 @@ def test_stored_artifact_contains_no_customer_ids():
 
 # ── end to end: at-rest protection through the real API ──────────────────────────────────────────────
 
-def test_artifacts_and_snapshots_are_encrypted_on_disk_and_bound_to_their_workspace(client, env, demo_csv_bytes):
+def test_artifacts_and_snapshots_are_encrypted_in_storage_and_bound_to_their_workspace(client, env, demo_csv_bytes):
+    from churn import storage
     res = client.post('/api/upload?wait=1', data={'file': (io.BytesIO(demo_csv_bytes), 'd.csv'), 'algorithm': 'logistic_regression'},
                       content_type='multipart/form-data')
     assert res.get_json()['job']['status'] == 'done'
     row = registry.champion('local')
-    raw = open(row['artifact_path'], 'rb').read()
+    blobs = storage.get_storage()
+    raw = blobs.get(row['artifact_path'])
     assert row['artifact_path'].endswith('.cse') and raw.startswith(crypto.MAGIC) and b'churn' not in raw
-    snapshot = open(row['data_path'], 'rb').read()
+    snapshot = blobs.get(row['data_path'])
     assert snapshot.startswith(crypto.MAGIC) and b'CUST-' not in snapshot
 
     # An attacker who can write to storage copies tenant "local"'s artifact into another tenant's slot: it must not load.
-    import shutil
-    registry.model_dir('intruder', row['id'])
-    stolen = registry.model_dir('intruder', row['id']) + '/model.cse'
-    shutil.copy(row['artifact_path'], stolen)
+    stolen_key = f"{storage.model_prefix('intruder', row['id'] + 'x')}/model.cse"
+    blobs.put(stolen_key, raw)
     with db.get_engine().begin() as c:
         c.execute(db.models_t.insert().values(id=row['id'] + 'x', workspace_id='intruder', created_at=1.0, status='champion',
-                                              artifact_path=stolen, meta='{}'))
+                                              artifact_path=stolen_key, meta='{}'))
     crypto.dek_for('intruder')
     registry.forget()
-    with pytest.raises((InvalidTag, Exception)):
+    with pytest.raises(InvalidTag):
         registry.load_bundle('intruder', row['id'] + 'x')
 
 
@@ -156,7 +156,7 @@ def test_customer_fields_are_encrypted_in_the_database_but_still_served(client, 
                       content_type='multipart/form-data')
     assert res.get_json()['job']['status'] == 'done', res.get_json()
     with db.get_engine().connect() as c:
-        rows = c.execute(sa.select(db.customers_t.c.attrs, db.customers_t.c.reasons).where(db.customers_t.c.workspace_id == 'local').limit(30)).all()
+        rows = c.execute(sa.select(db.details_t.c.attrs, db.details_t.c.reasons).where(db.details_t.c.workspace_id == 'local').limit(30)).all()
     assert rows and all(r.attrs.startswith('enc1:') for r in rows)
     assert all((r.reasons is None) or r.reasons.startswith('enc1:') for r in rows)
     top = client.get('/api/customers?limit=1').get_json()['customers'][0]

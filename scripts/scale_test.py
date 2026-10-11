@@ -68,7 +68,7 @@ print('  after training:', ', '.join(f'{k} {v}s' for k, v in result['steps'].ite
 
 dbfile = os.path.join(tmp, 'churnsight.db')
 size = lambda p: sum(os.path.getsize(os.path.join(d, f)) for d, _, fs in os.walk(p) for f in fs) if os.path.isdir(p) else os.path.getsize(p)
-print(f'\nstorage: database {size(dbfile) / 1e6:.0f} MB · model artifacts + snapshot {size(os.path.join(tmp, "models")) / 1e6:.0f} MB')
+print(f'\nstorage: database {size(dbfile) / 1e6:.0f} MB · model artifacts + snapshot {size(os.path.join(tmp, "blobs")) / 1e6:.0f} MB')
 if proc:
     print(f'peak memory (RSS): {peak[0] / 1e6:.0f} MB')
 
