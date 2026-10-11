@@ -10,6 +10,7 @@ alembic>=1.13,<2
 skops>=0.10,<1
 cryptography>=50
 psycopg[binary]>=3.1,<4
+redis>=5,<9
 firebase-admin>=6.5,<7
 # Transitive packages with published vulnerabilities in older releases: pinned from below on purpose.
 pyjwt>=2.15

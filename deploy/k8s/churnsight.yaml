@@ -1,0 +1,126 @@
+# Reference Kubernetes manifests: web (autoscaled), worker (autoscaled), ingress, disruption budgets, network policy.
+# NOT applied or validated against a cluster during development (no cluster available). Treat as a starting point and review
+# before use: image, hostnames, secret names, resource sizes and the ingress class are placeholders.
+#
+# Prerequisites in the namespace:
+#   * a Secret `churnsight-secrets` with keys: DATABASE_URL, CHURN_MASTER_KEY (or use KEY_PROVIDER=aws-kms), METRICS_TOKEN
+#   * a Secret `firebase-admin` with key service-account.json
+#   * PostgreSQL (managed, e.g. RDS/Cloud SQL) reachable at DATABASE_URL, Redis at REDIS_URL, an S3 bucket for blobs
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: churnsight-config }
+data:
+  WORKSPACE_MODE: "user"
+  FLASK_ENV: "production"
+  STORAGE_BACKEND: "s3"
+  S3_BUCKET: "CHANGE-ME-churnsight-blobs"
+  REDIS_URL: "redis://redis:6379/0"
+  EMBEDDED_WORKER: "0"
+  GOOGLE_APPLICATION_CREDENTIALS: "/secrets/firebase/service-account.json"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: churnsight-web, labels: { app: churnsight, tier: web } }
+spec:
+  replicas: 3
+  strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+  selector: { matchLabels: { app: churnsight, tier: web } }
+  template:
+    metadata: { labels: { app: churnsight, tier: web } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: web
+          image: ghcr.io/CHANGE-ME/churnsight:latest
+          ports: [{ containerPort: 8080 }]
+          envFrom: [{ configMapRef: { name: churnsight-config } }, { secretRef: { name: churnsight-secrets } }]
+          volumeMounts: [{ name: firebase, mountPath: /secrets/firebase, readOnly: true }]
+          readinessProbe: { httpGet: { path: /api/ready, port: 8080 }, periodSeconds: 10, failureThreshold: 3 }
+          livenessProbe: { httpGet: { path: /api/health, port: 8080 }, periodSeconds: 20, failureThreshold: 3, initialDelaySeconds: 20 }
+          resources: { requests: { cpu: "500m", memory: 1Gi }, limits: { memory: 2Gi } }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+      volumes: [{ name: firebase, secret: { secretName: firebase-admin } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: churnsight-worker, labels: { app: churnsight, tier: worker } }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: churnsight, tier: worker } }
+  template:
+    metadata: { labels: { app: churnsight, tier: worker } }
+    spec:
+      terminationGracePeriodSeconds: 3600          # on SIGTERM the worker stops claiming and finishes its running job; if it is killed anyway the reaper requeues the job
+      securityContext: { runAsNonRoot: true, runAsUser: 1000, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: worker
+          image: ghcr.io/CHANGE-ME/churnsight:latest
+          command: ["python", "-m", "churn.worker", "--concurrency", "1"]
+          envFrom: [{ configMapRef: { name: churnsight-config } }, { secretRef: { name: churnsight-secrets } }]
+          resources: { requests: { cpu: "2", memory: 4Gi }, limits: { memory: 6Gi } }     # a 100k-row training peaks near 0.7 GB; leave headroom
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: churnsight-web }
+spec:
+  selector: { app: churnsight, tier: web }
+  ports: [{ port: 80, targetPort: 8080 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: churnsight
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "30m"
+spec:
+  ingressClassName: nginx
+  tls: [{ hosts: [churn.example.com], secretName: churnsight-tls }]
+  rules:
+    - host: churn.example.com
+      http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: churnsight-web, port: { number: 80 } } } }] }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: churnsight-web }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: churnsight-web }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } } }]
+---
+# Workers scale on queue depth. Requires a metrics adapter (prometheus-adapter or KEDA) exposing churnsight_jobs{status="queued"}
+# scraped from /metrics. Without one, delete this and use a fixed replica count.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: churnsight-worker }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: churnsight-worker }
+  minReplicas: 2
+  maxReplicas: 30
+  metrics:
+    - type: External
+      external:
+        metric: { name: churnsight_jobs, selector: { matchLabels: { status: queued } } }
+        target: { type: AverageValue, averageValue: "2" }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: churnsight-web }
+spec: { minAvailable: 2, selector: { matchLabels: { app: churnsight, tier: web } } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: churnsight-worker }
+spec: { maxUnavailable: 1, selector: { matchLabels: { app: churnsight, tier: worker } } }
+---
+# Only the ingress controller may reach the pods.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: churnsight-ingress }
+spec:
+  podSelector: { matchLabels: { app: churnsight } }
+  policyTypes: [Ingress]
+  ingress:
+    - from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress-nginx } } }]
+      ports: [{ port: 8080 }]

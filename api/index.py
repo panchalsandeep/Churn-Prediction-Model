@@ -6,6 +6,7 @@ so accounts never see each other's models, customers or alerts.
 from __future__ import annotations
 
 import csv
+import hmac
 import io
 import json
 import logging
@@ -25,7 +26,7 @@ from flask_cors import CORS  # noqa: E402
 import firebase_admin  # noqa: E402
 from firebase_admin import auth  # noqa: E402
 
-from churn import config, db, handlers, jobs, privacy, registry, service, tenancy  # noqa: E402,F401
+from churn import config, db, handlers, jobs, observability, privacy, registry, service, tenancy  # noqa: E402,F401
 from churn.tenancy import TenancyError  # noqa: E402
 from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
@@ -42,6 +43,7 @@ BASE_DIR = config.BASE_DIR
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 
 app = Flask(__name__, static_folder=None)
+observability.init_sentry()
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_UPLOAD_MB * 1024 * 1024
 
 
@@ -197,7 +199,7 @@ _latency: Counter = Counter()
 @app.before_request
 def _start():
     g.t0 = time.perf_counter()
-    g.rid = request.headers.get('X-Request-ID') or uuid.uuid4().hex[:12]
+    g.rid = observability.clean_request_id(request.headers.get('X-Request-ID'), uuid.uuid4().hex[:12])
 
 
 @app.after_request
@@ -386,18 +388,19 @@ def health():
                     'workspace_mode': config.WORKSPACE_MODE, 'async_jobs': not config.SYNC_JOBS})
 
 
+@app.route('/api/ready', methods=['GET'])
+def readiness():
+    ok, checks = observability.ready()
+    return jsonify({'ready': ok, 'checks': checks}), (200 if ok else 503)
+
+
 @app.route('/metrics')
 def prometheus_metrics():
     token = os.environ.get('METRICS_TOKEN')
-    if not token or request.args.get('token') != token:
+    given = (request.headers.get('Authorization') or '').removeprefix('Bearer ').strip() or request.headers.get('X-Metrics-Token', '')
+    if not token or not hmac.compare_digest(given.encode(), token.encode()):      # header only: tokens in URLs end up in access logs
         return jsonify({'error': 'Not found'}), 404
-    lines = ['# TYPE churnsight_requests_total counter']
-    for (route, method, status), n in sorted(_counters.items()):
-        lines.append(f'churnsight_requests_total{{route="{route}",method="{method}",status="{status}"}} {n}')
-    lines.append('# TYPE churnsight_request_ms_sum counter')
-    for route, ms in sorted(_latency.items()):
-        lines.append(f'churnsight_request_ms_sum{{route="{route}"}} {ms:.1f}')
-    return Response('\n'.join(lines) + '\n', mimetype='text/plain')
+    return Response(observability.metrics_text(_counters, _latency), mimetype='text/plain')
 
 
 # ── Training / scoring jobs ───────────────────────────────────────────────────
@@ -436,7 +439,7 @@ def upload_file():
     exclude, allow_pii = form_list('exclude_columns'), form_list('allow_pii')
     ws, actor = g.ws, g.actor
     job_id = jobs.submit(ws, 'train', {'algorithm': algorithm, 'actor': actor, 'promote': promote, 'source': 'upload', 'target': target,
-                                       'exclude': exclude, 'allow_pii': allow_pii}, df, request.headers.get('Idempotency-Key'))
+                                       'exclude': exclude, 'allow_pii': allow_pii, 'rid': g.rid}, df, request.headers.get('Idempotency-Key'))
     return job_response(job_id)
 
 
@@ -450,7 +453,7 @@ def load_demo():
         rows = 8000
     ws, actor = g.ws, g.actor
     algorithm = body.get('algorithm') if body.get('algorithm') in ALGORITHMS else 'auto'
-    job_id = jobs.submit(ws, 'demo', {'rows': rows, 'algorithm': algorithm, 'actor': actor}, None, request.headers.get('Idempotency-Key'))
+    job_id = jobs.submit(ws, 'demo', {'rows': rows, 'algorithm': algorithm, 'actor': actor, 'rid': g.rid}, None, request.headers.get('Idempotency-Key'))
     return job_response(job_id)
 
 
@@ -463,7 +466,7 @@ def score_batch():
         return bad_request(str(exc))
     ws, actor = g.ws, g.actor
     allow_missing = request.form.get('allow_missing', '').lower() in ('1', 'true', 'yes')
-    job_id = jobs.submit(ws, 'score', {'actor': actor, 'allow_missing': allow_missing}, df, request.headers.get('Idempotency-Key'))
+    job_id = jobs.submit(ws, 'score', {'actor': actor, 'allow_missing': allow_missing, 'rid': g.rid}, df, request.headers.get('Idempotency-Key'))
     return job_response(job_id)
 
 

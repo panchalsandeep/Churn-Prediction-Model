@@ -10,15 +10,16 @@ COPY public ./public
 RUN npm run build
 
 FROM python:3.12-slim
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DATA_DIR=/data PORT=8080
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 DATA_DIR=/data PORT=8080 PYTHONPATH=/app/api
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt gunicorn
+COPY requirements.txt requirements-extras.txt ./
+RUN pip install -r requirements.txt -r requirements-extras.txt gunicorn
 COPY api ./api
 COPY --from=web /app/dist ./dist
 RUN useradd -m app && mkdir -p /data && chown app /data
 USER app
 VOLUME ["/data"]
 EXPOSE 8080
-# Threads (not many processes) keep one copy of each loaded model in memory; the job queue runs in-process.
+# Web: threads keep one copy of each loaded model per process. Jobs run in-process by default (EMBEDDED_WORKER=1). To scale out,
+# set EMBEDDED_WORKER=0 on web containers and run this same image with:  python -m churn.worker
 CMD ["sh", "-c", "exec gunicorn --chdir api --workers 2 --threads 8 --timeout 600 --bind 0.0.0.0:${PORT} index:app"]

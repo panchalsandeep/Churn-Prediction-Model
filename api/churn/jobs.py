@@ -220,6 +220,7 @@ def execute(job: dict, worker: str) -> None:
     hb = threading.Thread(target=beat, name=f'hb-{job_id[:6]}', daemon=True)
     hb.start()
     input_key = job.get('input_key')
+    log.info('job %s (%s) started attempt %s rid=%s', job_id, kind, job.get('attempts'), (db.loads(job.get('params')) or {}).get('rid'))
     try:
         with db.workspace_scope(ws):
             if job.get('cancel_requested'):
@@ -306,10 +307,16 @@ def run_worker(concurrency: int | None = None) -> None:
     threads = [threading.Thread(target=_loop, args=(f'{socket.gethostname()}:{os.getpid()}',), name=f'job-{i}', daemon=True) for i in range(n)]
     for t in threads:
         t.start()
-    try:
-        while any(t.is_alive() for t in threads):
-            time.sleep(1)
-    except KeyboardInterrupt:
+    import signal
+    shutdown = threading.Event()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, lambda *_: shutdown.set())      # Kubernetes sends SIGTERM: stop claiming, let running jobs finish
+        except ValueError:
+            pass                                                # not the main thread (tests)
+    while any(t.is_alive() for t in threads) and not shutdown.is_set():
+        time.sleep(0.5)
+    if shutdown.is_set():
         log.info('worker shutting down; finishing running jobs')
         _stop_all.set()
         _wake.set()

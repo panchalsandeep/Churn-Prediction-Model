@@ -3,4 +3,5 @@
 pytest>=9.0.3,<10
 pip-audit
 psutil
+fakeredis
 waitress

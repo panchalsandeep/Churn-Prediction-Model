@@ -41,7 +41,8 @@ Anything tabular with a churn label. Best results come from behavioural features
 | POST | `/api/preview` | Show how a CSV will be interpreted |
 | POST | `/api/upload` · `/api/demo` | Train (async job; `?wait=1` blocks) |
 | POST | `/api/score` | Score a new batch with the champion, report drift |
-| GET | `/api/jobs/<id>` | Job stage and progress |
+| GET · POST | `/api/jobs/<id>` · `/api/jobs/<id>/cancel` | Job stage and progress; cancel (admin). Send `Idempotency-Key` on POST to de-duplicate retries |
+| GET | `/api/health` · `/api/ready` · `/metrics` | Liveness; readiness (db, schema, storage, keys); Prometheus (needs `METRICS_TOKEN` as a Bearer header) |
 | GET | `/api/results` | Metrics, charts data, cohorts, segments, summary (no customer list) |
 | GET | `/api/customers` | Server-side paging: `tier, q, sort, dir, page, limit` |
 | GET/POST | `/api/customers/export` | Streamed, formula-safe CSV (POST with `ids`) |
@@ -70,13 +71,15 @@ Anything tabular with a churn label. Best results come from behavioural features
 
 ## Configuration
 
-See [.env.example](.env.example): `DATABASE_URL` (SQLite by default, Postgres for anything shared), `DATA_DIR`, upload and rate limits, `CORS_ORIGINS`, `METRICS_TOKEN`.
+See [.env.example](.env.example): `DATABASE_URL` (SQLite by default, Postgres for anything shared), `DATA_DIR`, upload and rate limits, `CORS_ORIGINS`, `METRICS_TOKEN`, and for scale-out `EMBEDDED_WORKER`, `REDIS_URL`, `STORAGE_BACKEND`/`S3_BUCKET`, `SENTRY_DSN`.
 
 ## Run it as a service
 
 ```bash
-docker compose up --build        # app + Postgres at http://localhost:8080
+docker compose up --build        # app + worker + Postgres + Redis at http://localhost:8080
 ```
+
+To run workers on their own (any number, same database and blob storage): `EMBEDDED_WORKER=0` on the web processes and `python -m churn.worker` for the workers. Back up with `python -m churn.backup backup --out DIR` (the master key is deliberately not included). Kubernetes reference manifests are in `deploy/k8s/`; they and the compose file have not been run.
 
 The image builds the frontend and serves it with the API behind gunicorn. `FLASK_ENV=production` makes auth fail closed, so provide Firebase Admin credentials (see the comments in `docker-compose.yml`) or drop that variable for a local trial.
 

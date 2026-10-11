@@ -49,8 +49,10 @@ Browser → API (TLS, Firebase ID token) · API → database · API → object/f
 | T22 | One tenant exhausts shared capacity | One active job per workspace, concurrency and queue caps, size-aware training plan, capped deep paging, explanation concurrency gate | ✅ |
 
 ## Residual risks (known, accepted for now)
-* **Rate limiting and caches are per process.** Behind several instances limits multiply. Needs Redis (roadmap D3).
-* **Jobs run in the web process.** A restart interrupts training (the job is marked failed, not lost silently). Needs the worker split (roadmap D2).
+* **Redis rate limiting is tested only against an in-memory fake** (`fakeredis`), not a real Redis. If Redis is down the limit falls back to per-process counting, so limits loosen rather than requests failing.
+* **Embedded job threads cannot be force-killed.** A runaway job in the web process is only stopped cooperatively; use dedicated workers (`python -m churn.worker`), which exit on timeout, for untrusted workloads.
+* **Queued uploads sit in blob storage (encrypted) until their job ends.** They are deleted on completion, cancellation and exhausted retries; a crash between steps can leave an orphan until the workspace is deleted.
+* **Backups contain ciphertext only; the master key is out of band.** Losing the key loses the backup. Restores have been tested only for SQLite.
 * **PostgreSQL RLS has not been run locally.** The Docker daemon was unavailable during development and no embedded Postgres exists for this platform. The Postgres CI job is therefore marked experimental until its first green run. Treat T3 and the PostgreSQL half of T13 as unproven.
 * **Firebase is a trusted third party** for authentication, MFA and SSO. A compromise there is a compromise here.
 * **Local key provider** keeps the master key in an environment variable. Use KMS/HSM in production (provider written, unverified).

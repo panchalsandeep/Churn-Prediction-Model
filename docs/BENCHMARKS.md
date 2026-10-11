@@ -93,4 +93,21 @@ Explanations are the CPU-bound part of serving: scoring a customer under 12 pert
 
 Bugs this testing found and fixed: an uncached dashboard aggregate that took 3.1 s, an ID search that scanned JSON attributes (1.7 s), segments computed by re-parsing every customer's JSON (4.6 s), and an off-by-one in the "large workspace" threshold that kept a 100,000-row workspace on the slow path.
 
-What was **not** measured: multi-process or multi-node throughput (waitress is one process; the Docker image runs gunicorn with 2 workers × 8 threads, which should scale reads and explanations roughly with worker count, but that is an expectation, not a result), Postgres, uploads beyond 100,000 rows, and long-duration soak behaviour.
+### Phase 1: scaling out
+
+**Several web processes.** Same 100,000-customer workspace, reads-only mix, 40 client threads, SQLite (WAL) shared by all processes, client on the same 12-core machine (so the client competes for CPU):
+
+| Server processes | Throughput | Overall p50 | Overall p95 | Errors |
+|---|---|---|---|---|
+| 1 | 307 req/s | 132 ms | 195 ms | 0 |
+| 4 | **756 req/s** | 26 ms | 98 ms | 0 |
+
+2.5× from 4 processes, not 4×: the load generator and SQLite's single writer share the same box. Page-by-risk p99 rose to ~1 s under four processes, which is SQLite lock contention; Postgres is the intended store for this. The workspace trained in one process was served correctly by the other three (cache invalidation by database revision works across processes).
+
+**Queue.** A 100,000-row training job submitted over HTTP ran through the durable queue in 59 s (same as before the queue). A separate `python -m churn.worker` process trained a model for a job enqueued by another process (automated test).
+
+**Narrow table.** Moving the encrypted `attrs`/`reasons` out of `customers` cut writing 100,000 scored customers from 12.7 s to 9.0 s.
+
+**LightGBM vs scikit-learn's HistGradientBoosting** (`scripts/bench_lgbm.py`, same preprocessing, 3 seeds, uncalibrated, PR-AUC): telco 67.0 vs 65.5, bank 69.0 vs 68.9, orange 86.0 vs 86.6, demo-8k 37.1 vs 36.4, demo-100k 41.6 vs 41.7 (HGB first). Fit time is similar. **LightGBM is not more accurate, so it was not adopted.** Its one advantage is exact per-customer explanations: 1,000 customers in 0.29 s against 1.9 s for the perturbation method on the same data. Because that only holds for a LightGBM model and the served model is a calibrated HGB, the explanation method stays as it is. Per-customer reasons are still precomputed for the riskiest 300 and computed on demand for the rest (about 110 ms each).
+
+What was **not** measured: Postgres throughput, multiple nodes, a real Redis, S3, Kubernetes autoscaling, containers (Docker was not started), uploads beyond 100,000 rows, and long-duration soak behaviour. Phase 1's exit criterion "restore drill passed" is met for SQLite only.

@@ -1,6 +1,7 @@
 """Small HTTP load test for the read-heavy endpoints (what a public dashboard actually serves).
 
     python scripts/loadtest.py http://localhost:5056 --threads 24 --seconds 20
+    python scripts/loadtest.py http://localhost:5056,http://localhost:5057 ...   # several servers, threads round-robin across them
 
 Requires a trained workspace on the target. Uses one keep-alive connection per thread and a realistic mix:
 dashboard payload, paged/sorted/filtered customer lists, customer detail, single predictions, alerts.
@@ -28,9 +29,10 @@ def main():
     ap.add_argument('--seconds', type=int, default=15)
     ap.add_argument('--reads-only', action='store_true', help='skip the CPU-heavy explain endpoints (detail, predict)')
     args = ap.parse_args()
-    u = urlparse(args.base)
+    bases = [urlparse(b) for b in args.base.split(',')]
 
-    def conn():
+    def conn(i=0):
+        u = bases[i % len(bases)]
         return http.client.HTTPConnection(u.hostname, u.port, timeout=60)
 
     def call(c, method, path, body=None):
@@ -72,8 +74,8 @@ def main():
     lock = threading.Lock()
     stop = time.time() + args.seconds
 
-    def worker():
-        c = conn()
+    def worker(i):
+        c = conn(i)
         while time.time() < stop:
             _, name, make = random.choice(population)
             method, path, body = make()
@@ -84,7 +86,7 @@ def main():
             except Exception:
                 ok = False
                 c.close()
-                c = conn()
+                c = conn(i)
             ms = (time.perf_counter() - t) * 1000
             with lock:
                 if ok:
@@ -92,7 +94,7 @@ def main():
                 else:
                     errors[name] += 1
 
-    threads = [threading.Thread(target=worker) for _ in range(args.threads)]
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(args.threads)]
     t0 = time.time()
     [t.start() for t in threads]
     [t.join() for t in threads]

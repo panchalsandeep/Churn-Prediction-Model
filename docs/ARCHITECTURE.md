@@ -62,7 +62,20 @@ On tabular customer snapshots of this size, gradient-boosted trees match or beat
 | Disk growth | Only `KEEP_MODELS` versions per workspace are retained; each version's scored snapshot goes with it. |
 | Abuse | Auth required, per-user rate limits (stricter for heavy endpoints), upload byte and row caps, formula-safe exports. |
 
-Still single-node by design: rate limiting is in-process (put Redis behind several instances), jobs run in-process (move to a worker queue such as RQ/Celery when you outgrow one box), and SQLite should give way to Postgres (`DATABASE_URL`) for anything shared.
+### Scaling out (Phase 1)
+
+| Piece | How it works |
+|---|---|
+| Job queue | `jobs` rows are a durable queue (`api/churn/jobs.py`). Any worker claims one with a conditional UPDATE (plus `FOR UPDATE SKIP LOCKED` on Postgres), heartbeats while it runs, and finishes it. A worker that stops heartbeating is detected by the reaper: the job is requeued with backoff, or failed after `JOB_MAX_ATTEMPTS`. Jobs can be cancelled (`POST /api/jobs/<id>/cancel`) and de-duplicated with an `Idempotency-Key` header. Uploaded datasets travel through blob storage, encrypted, and are deleted when the job ends. |
+| Workers | `EMBEDDED_WORKER=1` (default): threads inside the web process. `EMBEDDED_WORKER=0` plus `python -m churn.worker`: separate processes, scaled independently. On SIGTERM a worker stops claiming and finishes its job. A dedicated worker exits if a job overruns `JOB_TIMEOUT_S`; embedded threads can only be asked to stop. |
+| Blob storage | Model artifacts, scored snapshots and queued uploads go through `storage.py`: a local directory or S3. Everything is already ciphertext when stored. |
+| Hot vs wide data | `customers` holds the sortable numbers only; the encrypted `attrs`/`reasons` live in `customer_details` and are read by key. |
+| Rate limiting | `REDIS_URL` shares one sliding window across all web processes; if Redis is down each process falls back to its own counter instead of failing requests. |
+| Health | `/api/health` (liveness), `/api/ready` (database, schema at head, storage, keys), `/metrics` (needs `METRICS_TOKEN` in an `Authorization: Bearer` header; request counts, queue depth, oldest queued age, job outcomes). `X-Request-ID` is accepted if log-safe and carried into job logs. `SENTRY_DSN` enables error reporting with request data stripped. |
+| Backup | `python -m churn.backup backup/verify/restore` (SQLite + local blobs; Postgres via `pg_dump`). The master key is never in a backup: store it separately. |
+| Deployment | `docker-compose.yml` (web, worker, Postgres, Redis) and `deploy/k8s/churnsight.yaml` (web and worker deployments, HPAs, PDBs, ingress, network policy). Neither has been run: see docs/BENCHMARKS.md for what was verified. |
+
+SQLite remains the zero-setup default; use Postgres (`DATABASE_URL`) for anything shared across hosts.
 
 ## More than one way to look at churn
 

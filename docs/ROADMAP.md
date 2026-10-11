@@ -276,7 +276,7 @@ What is useful at inference time is *cheap adaptation without retraining*: **rec
 **Phase 0: Security, correctness, verification (3–4 weeks).** Fix the code bugs from §9 first: group-aware split and CV (#1), schema contract at scoring (#4), version-stamped safe artifacts (E1/A7). Then Postgres row-level security + tenant-isolation suite (A5), migrations (F1), SSO/MFA/RBAC (C9), envelope encryption design (per-tenant keys, KMS), immutable audit log, data-deletion flow (E4), PII controls (E3), threat model and scanning (E2), CI matrix and Docker/Postgres in CI (A1–A2).
 *Exit:* a pen-test-ready baseline; no known cross-tenant path; metrics unaffected by duplicate customers.
 
-**Phase 1: Scalable, reliable platform (3–5 weeks).** D2 queue and workers, D3 Redis, D7 object storage and direct uploads, D5 narrow score table, D4/B7 TreeSHAP and precomputed reasons, F2–F5, multi-worker load test (D1), Kubernetes with autoscaling, multi-AZ database, DR with RPO/RTO targets.
+**Phase 1: Scalable, reliable platform (3–5 weeks). STATUS: built and tested locally; cloud pieces unverified (see docs/BENCHMARKS.md, Phase 1).** D2 queue and workers, D3 Redis, D7 object storage and direct uploads, D5 narrow score table, D4/B7 TreeSHAP and precomputed reasons, F2–F5, multi-worker load test (D1), Kubernetes with autoscaling, multi-AZ database, DR with RPO/RTO targets.
 *Exit:* training survives restarts; horizontal scaling demonstrated; restore drill passed.
 
 **Phase 2: Seats, quotas, metering (2–3 weeks, can overlap Phase 1).** As in §6.

@@ -1,9 +1,14 @@
 """Small security helpers: rate limiting, CSV-injection protection, response headers."""
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import time
+import uuid
 from collections import defaultdict, deque
+
+log = logging.getLogger('churnsight.security')
 
 SECURITY_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
@@ -46,4 +51,48 @@ class RateLimiter:
             self._hits.clear()
 
 
-limiter = RateLimiter()
+class RedisRateLimiter:
+    """Sliding window shared by every web process (REDIS_URL). If Redis is unreachable we fall back to the per-process
+    limiter instead of failing requests: limits get looser, availability is kept."""
+
+    def __init__(self, client, fallback: RateLimiter) -> None:
+        self._r, self._fallback = client, fallback
+
+    def allow(self, key: str, limit: int, window: float = 60.0) -> tuple[bool, int]:
+        now, k = time.time(), f'rl:{key}'
+        try:
+            pipe = self._r.pipeline()
+            pipe.zremrangebyscore(k, 0, now - window)
+            pipe.zcard(k)
+            pipe.zrange(k, 0, 0, withscores=True)
+            _, count, oldest = pipe.execute()
+            if count >= limit:
+                return False, max(1, int(window - (now - oldest[0][1]))) if oldest else int(window)
+            pipe = self._r.pipeline()
+            pipe.zadd(k, {f'{now}:{uuid.uuid4().hex[:8]}': now})
+            pipe.expire(k, int(window) + 1)
+            pipe.execute()
+            return True, 0
+        except Exception as exc:  # noqa: BLE001  (any redis error)
+            log.warning('rate limiter falling back to in-process counting: %s', exc)
+            return self._fallback.allow(key, limit, window)
+
+    def reset(self) -> None:
+        self._fallback.reset()
+        try:
+            for k in self._r.scan_iter('rl:*'):
+                self._r.delete(k)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def make_limiter(url: str | None = None, client=None):
+    local = RateLimiter()
+    url = url if url is not None else os.environ.get('REDIS_URL')
+    if client is None and url:
+        import redis  # noqa: PLC0415 (optional dependency)
+        client = redis.Redis.from_url(url, socket_timeout=0.25, socket_connect_timeout=0.25)
+    return RedisRateLimiter(client, local) if client is not None else local
+
+
+limiter = make_limiter()
