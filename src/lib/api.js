@@ -65,7 +65,7 @@ export async function pollJob(jobId, { onProgress, signal, interval = 700 } = {}
     const job = await get(`/jobs/${jobId}`, { signal });
     onProgress?.(job);
     if (job.status === 'done') return job.result;
-    if (job.status === 'error') throw new ApiError(job.error || 'Job failed', 500);
+    if ((job.status === 'error' || job.status === 'cancelled')) throw new ApiError(job.error || 'Job failed', 500);
     await new Promise(r => setTimeout(r, interval));
   }
 }
@@ -74,7 +74,7 @@ export async function pollJob(jobId, { onProgress, signal, interval = 700 } = {}
 export async function runJob(path, { form, json, onProgress, signal } = {}) {
   const res = await request(path, { method: 'POST', form, json, signal });
   if (res.job && res.job.status === 'done') return res.job.result;
-  if (res.job && res.job.status === 'error') throw new ApiError(res.job.error || 'Job failed', 500);
+  if (res.job && (res.job.status === 'error' || res.job.status === 'cancelled')) throw new ApiError(res.job.error || 'Job failed', 500);
   return pollJob(res.job_id, { onProgress, signal });
 }
 

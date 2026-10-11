@@ -48,6 +48,13 @@ HEAVY_RATE_LIMIT_PER_MIN = int(os.environ.get('HEAVY_RATE_LIMIT_PER_MIN', '12'))
 MAX_CONCURRENT_JOBS = int(os.environ.get('MAX_CONCURRENT_JOBS', '2'))      # training/scoring jobs running at once
 MAX_QUEUED_JOBS = int(os.environ.get('MAX_QUEUED_JOBS', '20'))             # beyond this, new jobs are refused (503)
 JOB_RETENTION_DAYS = int(os.environ.get('JOB_RETENTION_DAYS', '7'))
+# Durable queue: a worker that stops heartbeating for JOB_STALE_S is presumed dead and its job is retried (up to JOB_MAX_ATTEMPTS).
+EMBEDDED_WORKER = _flag('EMBEDDED_WORKER', True)    # run workers as threads inside the web process; set 0 when running `python -m churn.worker`
+JOB_HEARTBEAT_S = float(os.environ.get('JOB_HEARTBEAT_S', '5'))
+JOB_STALE_S = float(os.environ.get('JOB_STALE_S', '45'))
+JOB_TIMEOUT_S = float(os.environ.get('JOB_TIMEOUT_S', '3600'))
+JOB_MAX_ATTEMPTS = int(os.environ.get('JOB_MAX_ATTEMPTS', '3'))
+JOB_POLL_S = float(os.environ.get('JOB_POLL_S', '0.5'))
 KEEP_MODELS = int(os.environ.get('KEEP_MODELS', '5'))                      # model versions kept per workspace
 TRAIN_TIME_BUDGET_S = int(os.environ.get('TRAIN_TIME_BUDGET_S', '900'))    # stop adding candidates after this long
 ATTRS_MAX_ROWS = int(os.environ.get('ATTRS_MAX_ROWS', '150000'))           # keep per-customer attributes for all rows up to this

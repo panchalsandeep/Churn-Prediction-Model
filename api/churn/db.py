@@ -113,7 +113,20 @@ jobs_t = sa.Table(
     sa.Column('result', sa.Text),
     sa.Column('created_at', sa.Float, nullable=False),
     sa.Column('finished_at', sa.Float),
+    # durable-queue columns (migration 0005)
+    sa.Column('params', sa.Text),                                  # JSON arguments for the job handler
+    sa.Column('input_key', sa.Text),                               # blob-storage key of the encrypted input dataset
+    sa.Column('attempts', sa.Integer, nullable=False, server_default='0'),
+    sa.Column('max_attempts', sa.Integer, nullable=False, server_default='3'),
+    sa.Column('run_after', sa.Float),                              # not claimable before this time (retry backoff)
+    sa.Column('locked_by', sa.String(80)),                         # worker id holding the job
+    sa.Column('heartbeat_at', sa.Float),
+    sa.Column('started_at', sa.Float),
+    sa.Column('cancel_requested', sa.Boolean, nullable=False, server_default=sa.false()),
+    sa.Column('idempotency_key', sa.String(80)),
 )
+sa.Index('ix_jobs_claim', jobs_t.c.status, jobs_t.c.run_after, jobs_t.c.created_at)
+sa.Index('ux_jobs_idempotency', jobs_t.c.workspace_id, jobs_t.c.idempotency_key, unique=True)
 
 score_batches_t = sa.Table(
     'score_batches', metadata,

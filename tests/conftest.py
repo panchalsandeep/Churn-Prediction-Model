@@ -31,13 +31,14 @@ def env(tmp_path_factory):
         with sa.create_engine(pg_url, isolation_level='AUTOCOMMIT').connect() as c:
             c.exec_driver_sql(f'CREATE SCHEMA {schema}')
         os.environ['DATABASE_URL'] = pg_url + ('&' if '?' in pg_url else '?') + f'options=-csearch_path%3D{schema}'
-    from churn import config, db, jobs, registry, storage
+    from churn import config, crypto, db, jobs, registry, storage
     from churn.security import limiter
     config.SYNC_JOBS = True
     db.reset_engine()
     jobs.reset_state()
     registry.forget()
     storage.reset()
+    crypto.reset()
     limiter.reset()
     yield data
     db.reset_engine()

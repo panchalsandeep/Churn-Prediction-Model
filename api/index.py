@@ -25,7 +25,7 @@ from flask_cors import CORS  # noqa: E402
 import firebase_admin  # noqa: E402
 from firebase_admin import auth  # noqa: E402
 
-from churn import config, db, jobs, privacy, registry, service, tenancy  # noqa: E402
+from churn import config, db, handlers, jobs, privacy, registry, service, tenancy  # noqa: E402,F401
 from churn.tenancy import TenancyError  # noqa: E402
 from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
@@ -435,8 +435,8 @@ def upload_file():
     algorithm, promote, target = parse_algorithm(), parse_promote(), request.form.get('target') or None
     exclude, allow_pii = form_list('exclude_columns'), form_list('allow_pii')
     ws, actor = g.ws, g.actor
-    job_id = jobs.submit(ws, 'train', lambda progress: service.run_training(ws, df, algorithm, actor, progress, promote, 'upload', target,
-                                                                           exclude, allow_pii))
+    job_id = jobs.submit(ws, 'train', {'algorithm': algorithm, 'actor': actor, 'promote': promote, 'source': 'upload', 'target': target,
+                                       'exclude': exclude, 'allow_pii': allow_pii}, df, request.headers.get('Idempotency-Key'))
     return job_response(job_id)
 
 
@@ -450,7 +450,7 @@ def load_demo():
         rows = 8000
     ws, actor = g.ws, g.actor
     algorithm = body.get('algorithm') if body.get('algorithm') in ALGORITHMS else 'auto'
-    job_id = jobs.submit(ws, 'train', lambda progress: service.run_training(ws, generate_demo(rows), algorithm, actor, progress, None, 'demo'))
+    job_id = jobs.submit(ws, 'demo', {'rows': rows, 'algorithm': algorithm, 'actor': actor}, None, request.headers.get('Idempotency-Key'))
     return job_response(job_id)
 
 
@@ -463,7 +463,7 @@ def score_batch():
         return bad_request(str(exc))
     ws, actor = g.ws, g.actor
     allow_missing = request.form.get('allow_missing', '').lower() in ('1', 'true', 'yes')
-    job_id = jobs.submit(ws, 'score', lambda progress: service.run_batch_scoring(ws, df, actor, progress, allow_missing))
+    job_id = jobs.submit(ws, 'score', {'actor': actor, 'allow_missing': allow_missing}, df, request.headers.get('Idempotency-Key'))
     return job_response(job_id)
 
 
@@ -472,6 +472,16 @@ def score_batch():
 def job_status(job_id):
     job = jobs.get(g.ws, job_id)
     return (jsonify(job), 200) if job else bad_request('Job not found', 404)
+
+
+@app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
+@require_firebase_auth(role='admin')
+def job_cancel(job_id):
+    job = jobs.cancel(g.ws, job_id)
+    if not job:
+        return bad_request('Job not found', 404)
+    db.audit(g.ws, g.actor, 'job.cancel', {'job': job_id})
+    return jsonify(job)
 
 
 # ── Results / customers ───────────────────────────────────────────────────────
