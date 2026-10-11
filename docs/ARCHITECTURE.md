@@ -79,6 +79,23 @@ On tabular customer snapshots of this size, gradient-boosted trees match or beat
 
 SQLite remains the zero-setup default; use Postgres (`DATABASE_URL`) for anything shared across hosts.
 
+## B2B pipeline (Phase 3)
+
+Accounts, product events, support tickets and invoices go in as four tables (CSV upload, an ingest API key, or a URL the server pulls). They are stored as encrypted blob batches, not database rows. A *target definition* says what "churned" means (`churn_date` inside a horizon, or `inactivity` for a horizon). The feature builder turns the tables into one row per live account per month-end using only records stamped on or before that date, labels each row by what happened in the following horizon, and drops rows whose horizon is not fully observed yet. Training uses the existing pipeline (grouped, time-based validation). Scoring runs the same builder as of the latest data.
+
+| Piece | Where | Notes |
+|---|---|---|
+| Tables, column mapping, validation | `ingest.py` | Canonical columns per table; personal-data columns dropped from account attributes; unparseable dates rejected; erasure removes raw rows too |
+| Features and targets | `features.py` | Point-in-time by construction (tested by poisoning the future); label maturity; preview with warnings (too few positives, implausible base rate, no mature snapshots) |
+| Orchestration | `pipeline.py` | `pipeline_train` (build, train, score today) and `pipeline_score` (sync sources, build, score) jobs on the durable queue; schedule claimed through the `schedules` table so many workers can tick safely |
+| Machine access | `apikeys.py` | Ingest-scoped keys, hash only stored, shown once, per-key rate limit; accepted by `/api/ingest/<table>` and nowhere else |
+| Pull connectors | `connectors.py` | Generic JSON/CSV over HTTP with pagination (`next_path`), incremental cursor (`since_param`), column mapping; URL and headers sealed |
+| Safe outbound HTTP | `safehttp.py` | Public addresses only, address pinned after resolution, no redirects, size and time caps |
+| Alerts to people | `notify.py` | Slack, HMAC-signed webhook, email; one digest per channel per scoring run, only for newly created alerts; account details only if the channel opts in |
+| Test data | `b2b_sim.py` | Synthetic accounts/events/tickets/invoices with planted mechanics. Proves the plumbing, says nothing about real customers |
+
+Limits worth knowing: static account attributes are as of the last upload (not versioned); the event vocabulary for per-event-type features is fixed at training time; the scheduler needs a worker loop (embedded or `python -m churn.worker`), so it does not run on serverless; event tables are held in memory when building features (cap `MAX_TABLE_ROWS`, default 5M rows per table).
+
 ## More than one way to look at churn
 
 * **Predictive model** (calibrated, tuned boosting chosen against linear and forest baselines) for "who, how likely".

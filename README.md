@@ -42,6 +42,11 @@ Anything tabular with a churn label. Best results come from behavioural features
 | POST | `/api/upload` · `/api/demo` | Train (async job; `?wait=1` blocks) |
 | POST | `/api/score` | Score a new batch with the champion, report drift |
 | GET · POST | `/api/jobs/<id>` · `/api/jobs/<id>/cancel` | Job stage and progress; cancel (admin). Send `Idempotency-Key` on POST to de-duplicate retries |
+| POST · GET · DELETE | `/api/data/<table>` · `/api/pipeline` · `/api/data` | B2B tables (accounts, events, tickets, invoices): upload CSV, pipeline status, drop tables (owner) |
+| POST | `/api/pipeline/target` · `/api/pipeline/run` | Preview or save the churn definition; train from the tables and score today |
+| PUT | `/api/pipeline/schedule` | Score automatically every N hours |
+| POST | `/api/ingest/<table>` | Push rows from your systems with an ingest API key (`Authorization: Bearer cs_live_…`) |
+| GET · POST · DELETE | `/api/api-keys` · `/api/sources` · `/api/channels` | Ingest keys, pull sources (JSON/CSV over HTTP), alert channels (Slack, signed webhook, email) |
 | GET | `/api/usage` · `/api/usage/export` | Plan, seats, monthly usage against limits (admin); usage CSV for billing |
 | GET · DELETE | `/api/invites` · `/api/invites/<id>` | Pending invitations; revoke one (frees its seat) |
 | PUT | `/api/platform/workspaces/<id>/plan` | Platform admin only: set a workspace's plan |

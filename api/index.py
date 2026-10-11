@@ -31,7 +31,7 @@ from churn.tenancy import TenancyError  # noqa: E402
 from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
 from churn.jobs import JobRejected  # noqa: E402
-from churn import quotas  # noqa: E402
+from churn import apikeys, connectors, features, ingest, notify, pipeline, quotas  # noqa: E402
 from churn.quotas import QuotaExceeded  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
@@ -173,6 +173,29 @@ def require_firebase_auth(f=None, *, heavy: bool = False, role: str = 'viewer', 
             return fn(*args, **kwargs)
         return decorated
     return wrap(f) if f else wrap
+
+
+def require_api_key(scope: str):
+    """Machine authentication for data ingestion: a workspace-bound key, accepted nowhere else."""
+    def wrap(fn):
+        @wraps(fn)
+        def decorated(*args, **kwargs):
+            header = request.headers.get('Authorization') or ''
+            key = apikeys.verify(header.split('Bearer ', 1)[1].strip() if header.startswith('Bearer ') else '', scope)
+            if not key:
+                return jsonify({'error': 'Unauthorized: missing, invalid or revoked API key.'}), 401
+            ok, retry = limiter.allow(f"key:{key['id']}", int(os.environ.get('INGEST_RATE_LIMIT_PER_MIN', '120')))
+            if not ok:
+                resp = jsonify({'error': 'Too many requests. Slow down or send larger batches.'})
+                resp.status_code = 429
+                resp.headers['Retry-After'] = str(retry)
+                return resp
+            g.ws, g.role, g.uid, g.email, g.actor = key['workspace_id'], 'analyst', f"key:{key['id']}", None, f"api-key:{key['name']}"
+            quotas.record(g.ws, 'api_calls', 1, buffered=True)
+            db.workspace_context.set(g.ws)
+            return fn(*args, **kwargs)
+        return decorated
+    return wrap
 
 
 def ensure_role(minimum: str) -> None:
@@ -409,6 +432,183 @@ def prometheus_metrics():
     if not token or not hmac.compare_digest(given.encode(), token.encode()):      # header only: tokens in URLs end up in access logs
         return jsonify({'error': 'Not found'}), 404
     return Response(observability.metrics_text(_counters, _latency), mimetype='text/plain')
+
+
+# ── B2B data pipeline ─────────────────────────────────────────────────────────
+
+MAX_INGEST_ROWS = int(os.environ.get('MAX_INGEST_ROWS', '5000'))
+
+
+def _mapping_from_form() -> dict:
+    raw = request.form.get('mapping') or ''
+    try:
+        m = json.loads(raw) if raw else {}
+    except ValueError:
+        raise ValueError('mapping must be a JSON object such as {"account_id": "CustomerRef"}.') from None
+    if not isinstance(m, dict):
+        raise ValueError('mapping must be a JSON object.')
+    return {str(k): str(v) for k, v in m.items()}
+
+
+@app.route('/api/data/<role>', methods=['POST'])
+@require_firebase_auth(role='admin')
+def data_upload(role):
+    try:
+        df = ingest.normalize(role, read_upload(), _mapping_from_form())
+        res = ingest.put_table(g.ws, role, df, request.form.get('mode', 'replace' if role == 'accounts' else 'append'))
+    except ingest.IngestError as exc:
+        return bad_request(str(exc))
+    except ValueError as exc:
+        return bad_request(str(exc))
+    db.audit(g.ws, g.actor, 'data.upload', {'table': role, 'rows': res['rows_added'], 'mode': res['mode']})
+    return jsonify(res), 201
+
+
+@app.route('/api/ingest/<role>', methods=['POST'])
+@require_api_key('ingest')
+def data_ingest(role):
+    """Push rows from your own systems: POST {"rows": [...], "mapping": {...}} with an ingest API key."""
+    body = request.get_json(silent=True) or {}
+    rows = body.get('rows')
+    if not isinstance(rows, list) or not rows or not all(isinstance(r, dict) for r in rows):
+        return bad_request('Send {"rows": [ {...}, ... ]} with at least one row.')
+    if len(rows) > MAX_INGEST_ROWS:
+        return bad_request(f'At most {MAX_INGEST_ROWS:,} rows per request. Split the batch.', 413)
+    try:
+        df = ingest.normalize(role, pd.DataFrame(rows), body.get('mapping') if isinstance(body.get('mapping'), dict) else None)
+        res = ingest.put_table(g.ws, role, df, 'append')
+    except ValueError as exc:
+        return bad_request(str(exc))
+    db.audit(g.ws, g.actor, 'data.ingest', {'table': role, 'rows': res['rows_added']})
+    return jsonify(res), 202
+
+
+@app.route('/api/data', methods=['DELETE'])
+@require_firebase_auth(role='owner')
+def data_drop():
+    ingest.drop_all(g.ws)
+    db.audit(g.ws, g.actor, 'data.drop_tables')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/pipeline', methods=['GET'])
+@require_firebase_auth(role='admin')
+def pipeline_status():
+    return jsonify(pipeline.status(g.ws))
+
+
+@app.route('/api/pipeline/target', methods=['POST'])
+@require_firebase_auth(role='admin')
+def pipeline_target():
+    """Preview what a churn definition produces; with "save": true also keep it as the workspace's target."""
+    body = request.get_json(silent=True) or {}
+    spec = {k: body[k] for k in ('type', 'horizon_days', 'observed_through') if k in body}
+    try:
+        out = pipeline.set_target(g.ws, spec) if body.get('save') else pipeline.preview(g.ws, spec)
+    except (features.TargetError, ValueError) as exc:
+        return bad_request(str(exc))
+    if body.get('save'):
+        db.audit(g.ws, g.actor, 'pipeline.target', out['spec'])
+    return jsonify(out)
+
+
+@app.route('/api/pipeline/run', methods=['POST'])
+@require_firebase_auth(heavy=True, role='admin')
+def pipeline_run():
+    body = request.get_json(silent=True) or {}
+    algorithm = body.get('algorithm') if body.get('algorithm') in ALGORITHMS else 'auto'
+    job_id = jobs.submit(g.ws, 'pipeline_train', {'algorithm': algorithm, 'actor': g.actor, 'rid': g.rid}, None, request.headers.get('Idempotency-Key'))
+    return job_response(job_id)
+
+
+@app.route('/api/pipeline/schedule', methods=['PUT'])
+@require_firebase_auth(role='admin')
+def pipeline_schedule():
+    body = request.get_json(silent=True) or {}
+    try:
+        out = pipeline.set_schedule(g.ws, bool(body.get('enabled', True)), body.get('every_hours', 24))
+    except ValueError as exc:
+        return bad_request(str(exc))
+    db.audit(g.ws, g.actor, 'pipeline.schedule', {'enabled': out['enabled'], 'every_hours': out['every_hours']})
+    return jsonify(out)
+
+
+@app.route('/api/sources', methods=['GET', 'POST'])
+@require_firebase_auth(role='admin')
+def sources():
+    if request.method == 'GET':
+        return jsonify({'sources': connectors.list_sources(g.ws)})
+    try:
+        return jsonify(connectors.add_source(g.ws, request.get_json(silent=True) or {}, g.actor)), 201
+    except connectors.SourceError as exc:
+        return bad_request(str(exc))
+
+
+@app.route('/api/sources/<sid>', methods=['PATCH', 'DELETE'])
+@require_firebase_auth(role='admin')
+def source_item(sid):
+    if request.method == 'DELETE':
+        return (jsonify({'ok': True}), 200) if connectors.remove_source(g.ws, sid, g.actor) else bad_request('Source not found', 404)
+    out = connectors.set_enabled(g.ws, sid, bool((request.get_json(silent=True) or {}).get('enabled', True)))
+    return jsonify(out) if out else bad_request('Source not found', 404)
+
+
+@app.route('/api/sources/<sid>/sync', methods=['POST'])
+@require_firebase_auth(heavy=True, role='admin')
+def source_sync(sid):
+    try:
+        out = connectors.sync(g.ws, sid)
+    except connectors.SourceError as exc:
+        return bad_request(str(exc), 404)
+    db.audit(g.ws, g.actor, 'source.sync', {'id': sid, 'ok': out['ok'], 'rows': out['rows']})
+    return jsonify(out)
+
+
+@app.route('/api/channels', methods=['GET', 'POST'])
+@require_firebase_auth(role='admin')
+def channels():
+    if request.method == 'GET':
+        return jsonify({'channels': notify.list_channels(g.ws), 'email_configured': bool(os.environ.get('SMTP_HOST'))})
+    try:
+        return jsonify(notify.add_channel(g.ws, request.get_json(silent=True) or {}, g.actor)), 201
+    except notify.NotifyError as exc:
+        return bad_request(str(exc))
+
+
+@app.route('/api/channels/<cid>', methods=['PATCH', 'DELETE'])
+@require_firebase_auth(role='admin')
+def channel_item(cid):
+    if request.method == 'DELETE':
+        return (jsonify({'ok': True}), 200) if notify.remove_channel(g.ws, cid, g.actor) else bad_request('Channel not found', 404)
+    out = notify.update_channel(g.ws, cid, request.get_json(silent=True) or {}, g.actor)
+    return jsonify(out) if out else bad_request('Channel not found', 404)
+
+
+@app.route('/api/channels/<cid>/test', methods=['POST'])
+@require_firebase_auth(heavy=True, role='admin')
+def channel_test(cid):
+    res = notify.test_channel(g.ws, cid)
+    if res is None:
+        return bad_request('Channel not found', 404)
+    return jsonify({'ok': res[0], 'detail': res[1]})
+
+
+@app.route('/api/api-keys', methods=['GET', 'POST'])
+@require_firebase_auth(role='admin')
+def api_keys():
+    if request.method == 'GET':
+        return jsonify({'keys': apikeys.list_keys(g.ws)})
+    body = request.get_json(silent=True) or {}
+    try:
+        return jsonify(apikeys.create(g.ws, body.get('name', ''), body.get('scope', 'ingest'), g.actor)), 201       # the key is shown once
+    except apikeys.KeyError_ as exc:
+        return bad_request(str(exc))
+
+
+@app.route('/api/api-keys/<key_id>', methods=['DELETE'])
+@require_firebase_auth(role='admin')
+def api_key_revoke(key_id):
+    return (jsonify({'ok': True}), 200) if apikeys.revoke(g.ws, key_id, g.actor) else bad_request('Key not found', 404)
 
 
 # ── Training / scoring jobs ───────────────────────────────────────────────────

@@ -55,6 +55,10 @@ Browser → API (TLS, Firebase ID token) · API → database · API → object/f
 * **Backups contain ciphertext only; the master key is out of band.** Losing the key loses the backup. Restores have been tested only for SQLite.
 * **PostgreSQL RLS has not been run locally.** The Docker daemon was unavailable during development and no embedded Postgres exists for this platform. The Postgres CI job is therefore marked experimental until its first green run. Treat T3 and the PostgreSQL half of T13 as unproven.
 * **Firebase is a trusted third party** for authentication, MFA and SSO. A compromise there is a compromise here.
+* **Outbound requests are a new attack surface (SSRF).** Webhook and connector URLs are typed by customers. `safehttp.py` resolves once, requires every address to be public, connects to that address, refuses redirects and caps size and time; the checks are unit-tested including DNS-rebinding style answers, but have not had a third-party review. IPv6 and unusual DNS setups deserve attention in a pen test.
+* **Alert channels send customer information to third parties** (Slack, email providers) only when a channel opts in to account details; the default digest has counts and totals only.
+* **Connector credentials** (API tokens for the customer's vendor) are sealed with the workspace key but must be decrypted in the worker to be used, so a compromised worker can read them. Prefer read-only, narrowly scoped tokens.
+* **Ingest API keys** are bearer secrets with no IP allow-list or expiry; revoke on leak. Scope is limited to appending rows to the four tables.
 * **Local key provider** keeps the master key in an environment variable. Use KMS/HSM in production (provider written, unverified).
 * **Field encryption disables attribute search** by design; searching is by customer id only.
 * **No Content-Security-Policy yet**, and no penetration test has been performed. Both are required before handling real customer data at scale.

@@ -183,6 +183,31 @@ invites_t = sa.Table(
     sa.Column('accepted_at', sa.Float),
 )
 
+schedules_t = sa.Table(
+    'schedules', metadata,
+    sa.Column('workspace_id', sa.String(80), primary_key=True),
+    sa.Column('kind', sa.String(24), primary_key=True),            # pipeline_score
+    sa.Column('every_hours', sa.Float, nullable=False),
+    sa.Column('next_run_at', sa.Float, nullable=False, index=True),
+    sa.Column('enabled', sa.Boolean, nullable=False, server_default=sa.true()),
+    sa.Column('last_job_id', sa.String(32)),
+    sa.Column('last_status', sa.String(200)),
+    sa.Column('updated_at', sa.Float, nullable=False),
+)
+
+api_keys_t = sa.Table(
+    'api_keys', metadata,
+    sa.Column('id', sa.String(16), primary_key=True),
+    sa.Column('workspace_id', sa.String(80), nullable=False, index=True),
+    sa.Column('name', sa.String(80), nullable=False),
+    sa.Column('key_hash', sa.String(64), nullable=False, index=True, unique=True),   # only a hash is stored; the key is shown once
+    sa.Column('scope', sa.String(16), nullable=False),                   # ingest
+    sa.Column('created_by', sa.String(254)),
+    sa.Column('created_at', sa.Float, nullable=False),
+    sa.Column('last_used_at', sa.Float),
+    sa.Column('revoked_at', sa.Float),
+)
+
 usage_t = sa.Table(
     'usage_counters', metadata,
     sa.Column('workspace_id', sa.String(80), primary_key=True),

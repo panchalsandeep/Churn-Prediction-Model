@@ -157,4 +157,5 @@ def wipe(ws: str) -> None:
             conn.execute(sa.delete(t).where(t.c.workspace_id == ws))
     storage.get_storage().delete_prefix(storage.model_prefix(ws))
     storage.get_storage().delete_prefix(storage.upload_prefix(ws))
+    storage.get_storage().delete_prefix(storage.table_prefix(ws))
     forget(ws)

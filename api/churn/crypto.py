@@ -205,3 +205,19 @@ def decrypt_text(ws: str, value: str | None, context: str) -> str | None:
     if value is None or not value.startswith(FIELD_PREFIX):
         return value
     return decrypt_bytes(ws, base64.b64decode(value[len(FIELD_PREFIX):]), context).decode()
+
+
+SEALED_PREFIX = 'sealed1:'
+
+
+def seal_json(ws: str, obj, context: str) -> str:
+    """Always-encrypted small secret (connector credentials, webhook URLs). Unlike encrypt_text this ignores ENCRYPT_FIELDS."""
+    import json
+    return SEALED_PREFIX + base64.b64encode(encrypt_bytes(ws, json.dumps(obj).encode(), context)).decode()
+
+
+def unseal_json(ws: str, value: str, context: str):
+    import json
+    if not isinstance(value, str) or not value.startswith(SEALED_PREFIX):
+        raise ValueError('Value is not sealed.')
+    return json.loads(decrypt_bytes(ws, base64.b64decode(value[len(SEALED_PREFIX):]), context))

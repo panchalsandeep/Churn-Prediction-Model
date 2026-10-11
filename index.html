@@ -628,6 +628,60 @@
         <div id="usage-meters" class="usage-meters"></div>
       </div>
 
+      <div class="card admin-card admin-wide" id="pipeline-card" data-min-role="admin">
+        <div class="table-card-header"><div><h3>Data pipeline · B2B accounts</h3><p id="pipeline-sub">Loading…</p></div>
+          <button class="btn-primary btn-small" id="pipeline-run" type="button" disabled>Train from tables</button></div>
+        <div class="pipe-grid">
+          <section><h4>1 · Tables</h4>
+            <div id="pipe-tables"></div>
+            <form id="pipe-upload-form" class="pipe-form">
+              <select id="pipe-role" aria-label="Table"><option value="accounts">accounts</option><option value="events">events</option><option value="tickets">tickets</option><option value="invoices">invoices</option></select>
+              <input type="file" id="pipe-file" accept=".csv,text/csv" aria-label="CSV file" />
+              <select id="pipe-mode" aria-label="Mode"><option value="append">add rows</option><option value="replace">replace table</option></select>
+              <input id="pipe-mapping" placeholder='optional column mapping {"account_id":"CustomerRef"}' aria-label="Column mapping" />
+              <button class="btn-secondary btn-small" type="submit">Upload</button>
+            </form><small class="muted" id="pipe-role-help"></small></section>
+          <section><h4>2 · What does “churned” mean?</h4>
+            <div class="pipe-form">
+              <select id="pipe-type" aria-label="Definition"><option value="churn_date">Account has a churn date</option><option value="inactivity">No product activity</option></select>
+              <label class="inline-label">within <input type="number" id="pipe-horizon" value="90" min="14" max="365" aria-label="Horizon in days" /> days</label>
+              <button class="btn-secondary btn-small" id="pipe-preview-btn" type="button">Preview</button>
+              <button class="btn-primary btn-small" id="pipe-save-btn" type="button">Save</button>
+            </div><div id="pipe-preview"></div></section>
+          <section><h4>3 · Scheduled scoring</h4>
+            <div class="pipe-form"><label class="inline-label"><input type="checkbox" id="pipe-sched-on" /> score automatically every <input type="number" id="pipe-sched-hours" value="24" min="1" max="744" aria-label="Hours between runs" /> hours</label>
+              <button class="btn-secondary btn-small" id="pipe-sched-save" type="button">Save</button></div>
+            <small class="muted" id="pipe-sched-status"></small></section>
+          <section><h4>4 · Alert channels</h4>
+            <div id="chan-list"></div>
+            <form id="chan-form" class="pipe-form">
+              <select id="chan-kind" aria-label="Kind"><option value="slack">Slack webhook</option><option value="webhook">Signed webhook</option><option value="email">Email</option></select>
+              <input id="chan-name" placeholder="name" aria-label="Name" />
+              <input id="chan-target" placeholder="https://hooks.slack.com/… or a@b.com, c@d.com" required aria-label="Destination" />
+              <select id="chan-sev" aria-label="Minimum severity"><option value="High">High only</option><option value="Medium">Medium and High</option></select>
+              <label class="inline-label"><input type="checkbox" id="chan-accounts" /> include account names and amounts</label>
+              <button class="btn-secondary btn-small" type="submit">Add channel</button>
+            </form></section>
+          <section><h4>5 · Push data with an API key</h4>
+            <div id="key-list"></div>
+            <form id="key-form" class="pipe-form"><input id="key-name" placeholder="key name, e.g. event pipeline" required aria-label="Key name" /><button class="btn-secondary btn-small" type="submit">Create key</button></form>
+            <div id="key-result" class="invite-result" hidden></div></section>
+          <section><h4>6 · Pull from a URL</h4>
+            <div id="src-list"></div>
+            <form id="src-form" class="pipe-form">
+              <input id="src-name" placeholder="name" aria-label="Name" />
+              <select id="src-role" aria-label="Table"><option value="accounts">accounts</option><option value="events">events</option><option value="tickets">tickets</option><option value="invoices">invoices</option></select>
+              <input id="src-url" placeholder="https://api.vendor.com/v1/records" required aria-label="URL" />
+              <input id="src-auth" placeholder="Authorization header value (kept encrypted)" autocomplete="off" aria-label="Authorization header" />
+              <select id="src-format" aria-label="Format"><option value="json">JSON</option><option value="csv">CSV</option></select>
+              <input id="src-records" placeholder="records path, e.g. data.items" aria-label="Records path" />
+              <input id="src-next" placeholder="next-page path, e.g. meta.next" aria-label="Next page path" />
+              <input id="src-since" placeholder="since parameter, e.g. updated_after" aria-label="Since parameter" />
+              <button class="btn-secondary btn-small" type="submit">Add source</button>
+            </form></section>
+        </div>
+      </div>
+
       <div class="card table-card admin-card admin-wide">
         <div class="table-card-header"><div><h3>Model registry</h3><p>Every training run is versioned. Promote any version to make it live.</p></div></div>
         <div class="table-wrapper"><table class="customer-table"><thead><tr>

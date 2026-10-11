@@ -172,6 +172,12 @@ def model_prefix(ws: str, model_id: str | None = None) -> str:
     return f'models/{safe}' + (f'/{model_id}' if model_id else '')
 
 
+def table_prefix(ws: str, role: str | None = None) -> str:
+    import re
+    base = f'tables/{re.sub(r"[^A-Za-z0-9_.-]", "_", ws)[:80]}'
+    return f'{base}/{role}' if role else base
+
+
 def upload_prefix(ws: str) -> str:
     import re
     return f'uploads/{re.sub(r"[^A-Za-z0-9_.-]", "_", ws)[:80]}'

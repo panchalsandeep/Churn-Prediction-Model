@@ -1,7 +1,7 @@
 """Job handlers: what a worker runs for each kind of job. Importing this module registers them."""
 from __future__ import annotations
 
-from . import jobs, service
+from . import jobs, notify, service  # noqa: F401  (notify registers the alert listener in worker processes too)
 from .demo_data import generate_demo
 
 
@@ -20,3 +20,15 @@ def demo(ws, params, df, progress):
 @jobs.handler('score')
 def score(ws, params, df, progress):
     return service.run_batch_scoring(ws, df, params.get('actor'), progress, bool(params.get('allow_missing')))
+
+
+@jobs.handler('pipeline_train')
+def pipeline_train(ws, params, df, progress):
+    from . import pipeline
+    return pipeline.run_train(ws, params.get('actor'), params.get('algorithm', 'auto'), progress)
+
+
+@jobs.handler('pipeline_score')
+def pipeline_score(ws, params, df, progress):
+    from . import pipeline
+    return pipeline.run_score(ws, params.get('actor'), progress)

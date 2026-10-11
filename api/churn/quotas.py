@@ -38,6 +38,7 @@ PLANS: dict[str, dict] = {
     'dev': {'seats': UNLIMITED, 'scored_accounts': UNLIMITED, 'training_runs': UNLIMITED, 'api_calls': UNLIMITED, 'rows_per_upload': UNLIMITED},
 }
 METRICS = ('scored_accounts', 'training_runs', 'api_calls')
+TRAIN_KINDS = ('train', 'pipeline_train')
 HARD = ('scored_accounts', 'training_runs')              # blocked at the limit; api_calls are soft
 
 
@@ -194,7 +195,7 @@ def check_job(ws: str, kind: str, rows: int | None) -> None:
     if kind == 'demo':
         return                                                    # the sample dataset is free and unmetered
     used = usage(ws)
-    if kind == 'train' and lim['training_runs'] is not None and used['training_runs'] >= lim['training_runs']:
+    if kind in TRAIN_KINDS and lim['training_runs'] is not None and used['training_runs'] >= lim['training_runs']:
         raise QuotaExceeded(f"You have used all {lim['training_runs']} training runs included this month.", 'training_runs',
                             lim['training_runs'], used['training_runs'])
     if lim['scored_accounts'] is not None and rows and used['scored_accounts'] + rows > lim['scored_accounts']:
@@ -202,11 +203,13 @@ def check_job(ws: str, kind: str, rows: int | None) -> None:
                             f"({used['scored_accounts']:,} already used).", 'scored_accounts', lim['scored_accounts'], used['scored_accounts'])
 
 
-def on_job_success(ws: str, kind: str, rows: int | None) -> None:
+def on_job_success(ws: str, kind: str, rows: int | None, result: dict | None = None) -> None:
     if kind == 'demo':
         return
-    if kind == 'train':
+    if kind in TRAIN_KINDS:
         record(ws, 'training_runs', 1)
+    if kind.startswith('pipeline_') and isinstance(result, dict):        # row counts are only known once the tables have been read
+        rows = result.get('rows') or (result.get('scored_today') or {}).get('rows') or rows
     if rows:
         record(ws, 'scored_accounts', rows)
 

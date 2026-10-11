@@ -2515,3 +2515,15 @@ html.returning #auth-overlay .auth-card { display: none; }
 .pending-invites ul { list-style: none; display: grid; gap: 6px; padding: 0; margin: 0; }
 .pending-invites li { display: flex; align-items: center; gap: 12px; font-size: 0.84rem; }
 .pending-invites li small { color: var(--text-3, var(--text-2)); margin-left: auto; }
+
+/* Phase 3: data pipeline */
+.pipe-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 22px 28px; padding: 4px 24px 24px; }
+.pipe-grid h4 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-2); margin-bottom: 8px; }
+.pipe-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.pipe-form input, .pipe-form select { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text-1); font: inherit; font-size: 0.82rem; min-width: 0; }
+.pipe-form input[type="number"] { width: 72px; }
+.pipe-form input:not([type]), .pipe-form input[type="text"] { flex: 1 1 200px; }
+.inline-label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-2); }
+.pipe-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; font-size: 0.84rem; border-bottom: 1px solid var(--border); }
+.pipe-row small { display: block; }
+#pipe-preview { margin-top: 12px; font-size: 0.84rem; }

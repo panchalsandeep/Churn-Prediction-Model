@@ -57,6 +57,7 @@ export async function request(path, { method = 'GET', json, form, signal } = {})
 
 export const get = (path, opts) => request(path, opts);
 export const post = (path, json, opts) => request(path, { ...opts, method: 'POST', json });
+export const put = (path, json, opts) => request(path, { ...opts, method: 'PUT', json });
 export const patch = (path, json, opts) => request(path, { ...opts, method: 'PATCH', json });
 
 /** Poll a background job until it finishes. Resolves with the job result or throws its error. */

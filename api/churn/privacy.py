@@ -41,10 +41,12 @@ def erase_customers(ws: str, ids: list[str], actor: str | None) -> dict:
         if len(kept) != len(scored):
             service.save_snapshot(ws, m['id'], kept)
             rewritten += 1
+    from . import ingest
+    raw_rows = ingest.erase_accounts(ws, ids)             # raw events/tickets/invoices uploaded through the B2B pipeline
     service.refresh_counts(ws)
     service.bump(ws)
-    db.audit(ws, actor, 'privacy.erase', {'customers': len(ids), 'removed_rows': erased})        # ids are not logged
-    return {'erased': erased, 'snapshots_rewritten': rewritten}
+    db.audit(ws, actor, 'privacy.erase', {'customers': len(ids), 'removed_rows': erased, 'raw_rows': raw_rows})        # ids are not logged
+    return {'erased': erased, 'snapshots_rewritten': rewritten, 'raw_rows_removed': raw_rows}
 
 
 def export_customer(ws: str, customer_id: str, actor: str | None) -> dict | None:

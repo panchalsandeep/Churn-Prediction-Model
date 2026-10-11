@@ -1,6 +1,7 @@
 """Application services: settings, scoring, summaries, alerts, interventions, monitoring."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -341,6 +342,9 @@ def _signals(reasons: list | None) -> list[str]:
     return out
 
 
+alert_listeners: list = []
+
+
 def regenerate_alerts(ws: str, settings: dict) -> int:
     rules = settings['alert_rules']
     now = time.time()
@@ -383,6 +387,11 @@ def regenerate_alerts(ws: str, settings: dict) -> int:
                                 'expected_loss': d['expected_loss'], 'created_at': now, 'updated_at': now})
         if inserts:
             conn.execute(at.insert(), inserts)
+    for listener in alert_listeners:                # e.g. notify.py: only alerts created by this run are announced
+        try:
+            listener(ws, inserts)
+        except Exception:  # noqa: BLE001  (a broken notifier must never fail scoring)
+            logging.getLogger('churnsight.alerts').warning('alert listener failed', exc_info=True)
     return len(desired)
 
 

@@ -86,6 +86,12 @@ def _admit(ws: str) -> None:
         raise JobRejected('The server is busy training other models. Please try again in a few minutes.', 503)
 
 
+def _accounts_rows(ws: str) -> int | None:
+    with db.get_engine().connect() as c:
+        raw = c.execute(sa.select(db.kv_t.c.value).where(db.kv_t.c.workspace_id == ws, db.kv_t.c.key == 'tables')).scalar()
+    return int(((db.loads(raw, {}) or {}).get('accounts') or {}).get('rows') or 0) or None
+
+
 def _by_key(ws: str, key: str) -> str | None:
     with db.get_engine().connect() as c:
         return c.execute(sa.select(db.jobs_t.c.id).where(db.jobs_t.c.workspace_id == ws, db.jobs_t.c.idempotency_key == key)).scalar()
@@ -99,6 +105,8 @@ def submit(ws: str, kind: str, params: dict | None = None, df: pd.DataFrame | No
     if key and (existing := _by_key(ws, key)):
         return existing
     rows = int(len(df)) if df is not None else int((params or {}).get('rows') or 0) or None
+    if rows is None and kind.startswith('pipeline_'):
+        rows = _accounts_rows(ws)                  # an estimate for the quota check; the real count is charged on success
     quotas.check_job(ws, kind, rows)
     _admit(ws)
     job_id = db.new_id()
@@ -231,7 +239,7 @@ def execute(job: dict, worker: str) -> None:
             df = _load_input(ws, job_id, input_key) if input_key else None
             result = HANDLERS[kind](ws, db.loads(job.get('params')) or {}, df, progress)
         if _finish(job_id, worker, status='done', stage='Done', progress=100, result=db.dumps(result), finished_at=time.time()):
-            quotas.on_job_success(ws, kind, (db.loads(job.get('params')) or {}).get('_rows'))
+            quotas.on_job_success(ws, kind, (db.loads(job.get('params')) or {}).get('_rows'), result)
     except JobCancelled:
         if why.get('r') not in ('timeout', 'lost'):
             _finish(job_id, worker, status='cancelled', stage='Cancelled', error='Cancelled.', finished_at=time.time())
@@ -263,6 +271,32 @@ _embedded_lock = threading.Lock()
 _stop_all = threading.Event()
 
 
+_periodic: list[list] = []                       # [fn, every_seconds, last_run]
+_periodic_lock = threading.Lock()
+
+
+def add_periodic(fn: Callable[[], object], every: float) -> None:
+    """Run `fn` about every `every` seconds from whichever worker loop gets there first (used by the scheduler)."""
+    with _periodic_lock:
+        if not any(p[0] is fn for p in _periodic):
+            _periodic.append([fn, every, 0.0])
+
+
+def _run_periodic() -> None:
+    now = time.time()
+    due = []
+    with _periodic_lock:
+        for p in _periodic:
+            if now - p[2] >= p[1]:
+                p[2] = now
+                due.append(p[0])
+    for fn in due:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            log.error('periodic task %s failed: %s', getattr(fn, '__name__', fn), traceback.format_exc())
+
+
 def _loop(name: str, once: bool = False) -> None:
     last_reap = 0.0
     while not _stop_all.is_set():
@@ -270,6 +304,7 @@ def _loop(name: str, once: bool = False) -> None:
             if time.time() - last_reap > config.JOB_STALE_S / 3:
                 reap()
                 last_reap = time.time()
+            _run_periodic()
             if run_next(f'{name}:{threading.get_ident()}'):
                 if once:
                     return
