@@ -81,7 +81,8 @@ def normalize(role: str, df: pd.DataFrame, mapping: dict[str, str] | None = None
     for c in spec['dates']:
         if c in out:
             parsed = pd.to_datetime(out[c], errors='coerce', utc=True, format='mixed').dt.tz_localize(None)
-            bad = parsed.isna() & out[c].notna() & out[c].astype(str).str.strip().ne('')
+            blank = out[c].isna() | out[c].astype(str).str.strip().str.lower().isin(['', 'nat', 'nan', 'none', 'null', 'n/a', '-'])      # "no date" spelled in the usual ways
+            bad = parsed.isna() & ~blank
             if len(out) and bad.mean() > 0.2:
                 raise IngestError(f'{int(bad.sum()):,} of {len(out):,} values in "{c}" are not dates (for example {out[c][bad].iloc[0]!r}).')
             out[c] = parsed

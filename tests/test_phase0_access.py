@@ -264,7 +264,7 @@ def test_audit_log_is_chained_and_detects_tampering(client, env, auth):
         with pytest.raises(Exception, match='append-only'):
             c.execute(sa.text("UPDATE audit_log SET actor = 'someone-else'"))
     with db.system_context(), db.get_engine().begin() as c:                    # a DBA who drops the trigger is still caught
-        c.execute(sa.text('DROP TRIGGER audit_log_no_update'))
+        c.execute(sa.text('DROP TRIGGER audit_log_no_update ON audit_log' if c.dialect.name == 'postgresql' else 'DROP TRIGGER audit_log_no_update'))
         c.execute(sa.text("UPDATE audit_log SET actor = 'forged' WHERE id = "
                           "(SELECT id FROM audit_log WHERE workspace_id = :w ORDER BY id LIMIT 1 OFFSET 2)"), {'w': ws})
     verdict = client.get('/api/audit', headers=team['adam']).get_json()['chain']

@@ -72,7 +72,7 @@ def trained(client, demo_csv_bytes):
 def ambient_workspace_context(request):
     """On PostgreSQL (row-level security) a test that calls services directly has no request to set a tenant. Give it the system
     context, except in the RLS suite itself, which must run with an empty context to prove the database fails closed."""
-    if not os.environ.get('TEST_DATABASE_URL') or request.module.__name__ == 'test_phase0_postgres':
+    if not os.environ.get('TEST_DATABASE_URL') or request.node.path.name == 'test_phase0_postgres.py':
         yield
         return
     from churn import db

@@ -17,6 +17,15 @@ PG_URL = os.environ.get('TEST_DATABASE_URL')
 pytestmark = pytest.mark.skipif(not (PG_URL or '').startswith('postgresql'), reason='needs TEST_DATABASE_URL (PostgreSQL)')
 
 
+@pytest.fixture(autouse=True)
+def empty_context():
+    """Every test here starts with NO tenant context, which is the state the database must fail closed in."""
+    from churn import db
+    token = db.workspace_context.set('')
+    yield
+    db.workspace_context.reset(token)
+
+
 @pytest.fixture(scope='module')
 def pg(env):
     from churn import db

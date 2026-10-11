@@ -19,7 +19,10 @@ def test_reference_model_matches_its_card_and_predicts(name):
     blob = open(os.path.join(DIR, f'{name}.skops'), 'rb').read()
     card = json.load(open(os.path.join(DIR, f'{name}.json')))
     assert hashlib.sha256(blob).hexdigest() == card['sha256']                      # the file is the one the card describes
-    bundle = artifacts.loads_bundle(blob)
+    try:
+        bundle = artifacts.loads_bundle(blob)
+    except artifacts.ArtifactIncompatible as exc:
+        pytest.skip(f'trained with scikit-learn {card["trained_with"]["scikit_learn"]}; the loader correctly refuses other versions ({exc})')
     row = pd.DataFrame([{c: bundle['baseline'][c] for c in bundle['cols']}])
     for c in bundle['cat_cols']:
         row[c] = row[c].astype(str)

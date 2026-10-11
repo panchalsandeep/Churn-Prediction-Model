@@ -138,15 +138,16 @@ def test_artifacts_and_snapshots_are_encrypted_in_storage_and_bound_to_their_wor
     assert snapshot.startswith(crypto.MAGIC) and b'CUST-' not in snapshot
 
     # An attacker who can write to storage copies tenant "local"'s artifact into another tenant's slot: it must not load.
-    stolen_key = f"{storage.model_prefix('intruder', row['id'] + 'x')}/model.cse"
+    stolen_id = row['id'][:31] + 'x'                                     # ids are 32 characters; PostgreSQL enforces the column length
+    stolen_key = f"{storage.model_prefix('intruder', stolen_id)}/model.cse"
     blobs.put(stolen_key, raw)
     with db.get_engine().begin() as c:
-        c.execute(db.models_t.insert().values(id=row['id'] + 'x', workspace_id='intruder', created_at=1.0, status='champion',
+        c.execute(db.models_t.insert().values(id=stolen_id, workspace_id='intruder', created_at=1.0, status='champion',
                                               artifact_path=stolen_key, meta='{}'))
     crypto.dek_for('intruder')
     registry.forget()
     with pytest.raises(InvalidTag):
-        registry.load_bundle('intruder', row['id'] + 'x')
+        registry.load_bundle('intruder', stolen_id)
 
 
 def test_customer_fields_are_encrypted_in_the_database_but_still_served(client, env, monkeypatch):
