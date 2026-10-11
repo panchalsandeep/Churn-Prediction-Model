@@ -302,3 +302,26 @@ def test_recency_does_not_depend_on_the_weekday_of_scoring(tables):
     assert (b[common] - a[common]).abs().mean() < 0.3
     monday = features.build_snapshot(tables, pd.Timestamp('2026-03-16')).set_index('customer_id')['days_since_last_activity']
     assert (monday.reindex(common) - a[common]).abs().mean() < 1.5                    # a whole weekend later is one working day, not three calendar days
+
+
+def test_columns_in_any_name_or_order_are_matched_confidently_or_flagged(client, env):
+    from churn import mapping
+    n = 60
+    accounts = pd.DataFrame({'Notes': ['x'] * n, 'Renews On': ['2027-01-05'] * n, 'Signed Up': ['2025-01-05'] * n, 'Customer Ref': [f'a{i}' for i in range(n)], 'MRR (USD)': np.arange(n) + 100.0})
+    s = mapping.suggest('accounts', accounts, ingest.ROLES['accounts'])
+    assert s['applied']['account_id'] == 'Customer Ref' and s['applied']['started_at'] == 'Signed Up' and s['applied']['contract_end'] == 'Renews On'
+    assert s['missing_required'] == [] and 'Notes' in s['unmatched']
+    assert len(ingest.normalize('accounts', accounts)) == n                                  # loads with no mapping at all, whatever the order
+    bad = pd.DataFrame({'Customer': [f'a{i}' for i in range(n)], 'Signup date': ['soon'] * n})
+    assert 'started_at' not in mapping.suggest('accounts', bad, ingest.ROLES['accounts'])['mapping']      # name says date, values are not dates
+    ev = pd.DataFrame({'when': pd.date_range('2026-01-01', periods=n, freq='h').astype(str), 'org_id': ['o1', 'o2', 'o3'] * 20, 'Action': ['login', 'export'] * 30})
+    se = mapping.suggest('events', ev, ingest.ROLES['events'])
+    assert se['mapping']['ts'] == 'when' and se['mapping']['account_id'] == 'org_id' and se['mapping']['event'] == 'Action'
+    out = ingest.normalize('accounts', accounts.assign(other_ref=[f'z{i}' for i in range(n)]), {'account_id': 'other_ref'})
+    assert out['account_id'].iloc[0] == 'z0'                                                 # the caller's mapping always wins
+    csv = accounts.to_csv(index=False).encode()
+    r = client.post('/api/data/accounts/preview', data={'file': (io.BytesIO(csv), 'a.csv')}, content_type='multipart/form-data')
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body['rows_loadable'] == n and body['applied']['account_id'] == 'Customer Ref' and body['problem'] is None
+    assert client.post('/api/data/payroll/preview', data={'file': (io.BytesIO(csv), 'a.csv')}, content_type='multipart/form-data').status_code == 400

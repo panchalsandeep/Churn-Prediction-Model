@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any
@@ -600,6 +601,9 @@ def recommendations(impacts: list[dict], tier: str) -> list[str]:
 
 # ── Prediction ─────────────────────────────────────────────────────────────────
 
+_NOT_ACTIONABLE = re.compile(r'(tenure|age|since|signup|sign_up|created|start|joined|date|renewal|contract_end|history|previous|prior|founded|size)', re.I)
+
+
 def form_schema(ws: str) -> dict | None:
     row, bundle = registry.champion_bundle(ws)
     if not bundle:
@@ -608,12 +612,13 @@ def form_schema(ws: str) -> dict | None:
     fields = []
     for c in bundle['cols']:
         rng = bundle['ranges'][c]
-        base = {'name': c, 'label': humanize(c).capitalize(), 'default': bundle['baseline'][c], 'rank': imp_rank.get(c, 99)}
+        base = {'name': c, 'label': humanize(c).capitalize(), 'default': bundle['baseline'][c], 'rank': imp_rank.get(c, 99),
+                'actionable': not _NOT_ACTIONABLE.search(c)}      # a lever someone could really pull (tenure and contract dates cannot be changed)
         if 'options' in rng:
             fields.append({**base, 'kind': 'category', 'options': rng['options']})
         else:
             fields.append({**base, 'kind': 'number', 'min': rng['min'], 'max': rng['max'], 'integer': rng['integer']})
-    return {'fields': fields, 'model_id': row['id'], 'thresholds': effective_thresholds(get_settings(ws), bundle),
+    return {'fields': fields, 'model_id': row['id'], 'correlated': bundle.get('correlated', []), 'thresholds': effective_thresholds(get_settings(ws), bundle),
             'revenue_field': (bundle['schema'].get('revenue_col') if bundle['schema'].get('revenue_col') in bundle['cols'] else None)}
 
 

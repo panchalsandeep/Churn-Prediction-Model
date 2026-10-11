@@ -4,6 +4,7 @@ import { get, post, patch, runJob } from '../lib/api.js';
 import { loadTeam, initTeam } from './team.js';
 import { loadPipeline, initPipeline } from './pipeline.js';
 import { loadMlops, initMlops } from './mlops.js';
+import { confirmDialog } from '../lib/dialog.js';
 
 let callbacks = { reloadResults: async () => {}, navigate: () => {} };
 let users = [];
@@ -176,7 +177,7 @@ export function initAdmin(cb) {
   });
 
   $('admin-reset-model-btn').addEventListener('click', async () => {
-    if (!window.confirm('Delete all models, scores, alerts and logged activity in this workspace? This cannot be undone.')) return;
+    if (!await confirmDialog('Delete all models, scores, alerts and logged activity in this workspace? This cannot be undone.', { title: 'Reset workspace', confirmLabel: 'Delete everything', danger: true })) return;
     try {
       await post('/workspace/reset', {});
       await callbacks.reloadResults();

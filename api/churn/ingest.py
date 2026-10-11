@@ -18,7 +18,7 @@ import uuid
 
 import pandas as pd
 
-from . import config, crypto, service, storage
+from . import config, crypto, mapping as colmap, service, storage
 from .schema import detect_pii
 
 ROLES: dict[str, dict] = {
@@ -40,12 +40,18 @@ def _norm(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '_', str(name).strip().lower()).strip('_')
 
 
-def normalize(role: str, df: pd.DataFrame, mapping: dict[str, str] | None = None) -> pd.DataFrame:
-    """Map customer columns onto the canonical schema and validate. Returns a clean frame; raises IngestError with a human message."""
+def normalize(role: str, df: pd.DataFrame, mapping: dict[str, str] | None = None, auto: bool = True) -> pd.DataFrame:
+    """Map customer columns onto the canonical schema and validate. Returns a clean frame; raises IngestError with a human message.
+
+    Columns the caller did not map are matched automatically when the match is confident (see mapping.py); weaker matches are never applied silently."""
     if role not in ROLES:
         raise IngestError(f'Unknown table "{role}". Use one of: {", ".join(ROLES)}.')
     spec = ROLES[role]
     mapping = {k: v for k, v in (mapping or {}).items() if v}
+    if auto:
+        found = colmap.suggest(role, df, spec)['applied']
+        used = set(mapping.values())
+        mapping = {**{k: v for k, v in found.items() if v not in used}, **mapping}      # the caller's choices always win
     cols = {_norm(c): c for c in df.columns}
     rename: dict[str, str] = {}
     for canon in spec['required'] + spec['optional']:

@@ -23,6 +23,10 @@ async function authHeaders() {
   return headers;
 }
 
+const requestIds = [];
+/** The last few server request ids, attached to bug reports so a problem can be traced in the logs. */
+export const recentRequestIds = () => requestIds.slice(-5);
+
 export async function request(path, { method = 'GET', json, form, signal } = {}) {
   const headers = await authHeaders();
   let body;
@@ -39,6 +43,8 @@ export async function request(path, { method = 'GET', json, form, signal } = {})
     if (err.name === 'AbortError') throw err;
     throw new ApiError('Cannot reach the server. Check your connection.', 0);
   }
+  const rid = res.headers.get('X-Request-ID');
+  if (rid && !res.ok) { requestIds.push(rid); if (requestIds.length > 20) requestIds.shift(); }      // failed calls are the ones worth tracing
   if (res.status === 304) return null;
   let data = null;
   const text = await res.text();

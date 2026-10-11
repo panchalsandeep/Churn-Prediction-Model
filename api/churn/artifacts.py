@@ -22,7 +22,7 @@ import skops.io as sio
 from . import db
 
 MAGIC = b'CSB1'
-ALLOWED_PREFIXES = ('sklearn.', 'numpy.', 'scipy.', 'builtins.', 'collections.')
+ALLOWED_PREFIXES = ('sklearn.', 'numpy.', 'scipy.', 'builtins.', 'collections.', '_loss.Cy')      # '_loss.Cy*' are scikit-learn's own Cython loss classes (older releases name the module just "_loss")
 _MODEL_KEY = 'model'
 
 

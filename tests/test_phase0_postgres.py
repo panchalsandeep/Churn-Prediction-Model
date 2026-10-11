@@ -72,7 +72,8 @@ def test_system_context_sees_everything_but_is_only_set_explicitly(pg):
 
 
 def test_audit_log_is_append_only_in_postgres(pg):
-    pg.audit('tenant_a', 'tester', 'pg.test')
+    with pg.workspace_scope('tenant_a'):
+        pg.audit('tenant_a', 'tester', 'pg.test')
     with pytest.raises(Exception, match='append-only'):
         with pg.workspace_scope('tenant_a'), pg.get_engine().begin() as c:
             c.execute(sa.text("UPDATE audit_log SET actor = 'forged' WHERE workspace_id = 'tenant_a'"))

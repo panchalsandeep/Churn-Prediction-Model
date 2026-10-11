@@ -107,23 +107,27 @@ def record(ws: str, metric: str, amount: float = 1, buffered: bool = False) -> N
         _upsert(c, ws, period(), metric, amount)
 
 
+_flush_lock = threading.Lock()      # a reader must never see counts that left the buffer but are not in the database yet
+
+
 def flush() -> int:
-    with _buf_lock:
-        pending = dict(_buffer)
-        _buffer.clear()
-    if not pending:
-        return 0
-    try:
-        with db.system_context(), db.get_engine().begin() as c:
-            for (ws, per, metric), amount in pending.items():
-                _upsert(c, ws, per, metric, amount)
-    except Exception:  # noqa: BLE001  (keep the counts for the next attempt rather than losing them)
-        log.warning('usage flush failed; will retry')
+    with _flush_lock:
         with _buf_lock:
-            for k, v in pending.items():
-                _buffer[k] += v
-        return 0
-    return len(pending)
+            pending = dict(_buffer)
+            _buffer.clear()
+        if not pending:
+            return 0
+        try:
+            with db.system_context(), db.get_engine().begin() as c:
+                for (ws, per, metric), amount in pending.items():
+                    _upsert(c, ws, per, metric, amount)
+        except Exception:  # noqa: BLE001  (keep the counts for the next attempt rather than losing them)
+            log.warning('usage flush failed; will retry')
+            with _buf_lock:
+                for k, v in pending.items():
+                    _buffer[k] += v
+            return 0
+        return len(pending)
 
 
 def _flush_loop() -> None:
@@ -152,14 +156,15 @@ def forget_plans() -> None:
 
 def usage(ws: str, per: str | None = None) -> dict[str, int]:
     per = per or period()
-    with db.system_context(), db.get_engine().connect() as c:
-        rows = c.execute(sa.select(db.usage_t.c.metric, db.usage_t.c.value).where(db.usage_t.c.workspace_id == ws, db.usage_t.c.period == per)).all()
-    out = {m: 0 for m in METRICS}
-    out.update({r.metric: int(r.value) for r in rows})
-    with _buf_lock:
-        for (w, p, metric), amount in _buffer.items():
-            if w == ws and p == per:
-                out[metric] = out.get(metric, 0) + int(amount)
+    with _flush_lock:
+        with db.system_context(), db.get_engine().connect() as c:
+            rows = c.execute(sa.select(db.usage_t.c.metric, db.usage_t.c.value).where(db.usage_t.c.workspace_id == ws, db.usage_t.c.period == per)).all()
+        out = {m: 0 for m in METRICS}
+        out.update({r.metric: int(r.value) for r in rows})
+        with _buf_lock:
+            for (w, p, metric), amount in _buffer.items():
+                if w == ws and p == per:
+                    out[metric] = out.get(metric, 0) + int(amount)
     return out
 
 

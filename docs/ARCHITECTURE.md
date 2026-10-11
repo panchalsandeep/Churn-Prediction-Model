@@ -115,6 +115,17 @@ Two design choices came out of testing: (1) drift is measured against the popula
 
 Limits: the loop is validated only on simulated data with simulated time. Realized metrics need 20+ churn events per run to be trusted and horizons of weeks to months, so a young workspace will show "not enough outcomes yet". Shadow evaluation doubles scoring cost while a challenger exists. Segment-level regression checks and uplift are not built.
 
+## Why not a neural network (decision record)
+
+Short version: not "never", but not as the default, and the data we have explains why.
+
+* **Tabular data is where gradient-boosted trees still win.** Across published benchmarks and our own runs, boosted trees match or beat deep models on mixed numeric and categorical tables of this kind, with far less tuning. Our b2b and demo results show even a linear model is competitive, which would leave a network nothing to add.
+* **Data volume.** Most workspaces have thousands of accounts and a few hundred churn events. Networks need far more labelled examples to beat trees and overfit easily at this size.
+* **Calibration and trust.** The product sells probabilities that finance and customer success act on. Trees plus Platt/isotonic calibration are well behaved; networks are typically over-confident and need extra care to be honest, and we measure honesty (Brier, calibration ratio, realized performance).
+* **Explanations.** Per-account reasons are a core feature. They are cheap and stable for trees and linear models and far harder to keep trustworthy for networks.
+* **Cost, latency and operations.** Training on a laptop-sized worker in under a minute, scoring 100k accounts in seconds, small artifacts that load with a safe format. Networks add GPUs, heavier artifacts and more failure modes.
+* **Where deep learning would be right**, and where we would add it: raw event sequences at large scale (sequence models over clickstreams), text (support tickets, call transcripts, via embeddings, planned in Phase 6 behind guardrails), and very large single-tenant datasets. In those cases it would be an additional candidate in the same selection and shadow-evaluation loop, kept only if it wins on realized outcomes.
+
 ## More than one way to look at churn
 
 * **Predictive model** (calibrated, tuned boosting chosen against linear and forest baselines) for "who, how likely".

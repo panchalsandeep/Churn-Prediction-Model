@@ -1,6 +1,7 @@
 /* Team & access, privacy tools, audit chain. Everything here is gated by role on the server; the UI just hides what you cannot use. */
 import { $, state, escapeHtml, showToast, fmtInt, timeAgo, can, replay } from '../lib/ctx.js';
 import { get, post, patch, request, download } from '../lib/api.js';
+import { confirmDialog, typeToConfirm } from '../lib/dialog.js';
 
 const ROLES = ['viewer', 'analyst', 'admin', 'owner'];
 const ROLE_HELP = {
@@ -122,7 +123,7 @@ export function initTeam({ reloadResults }) {
     const btn = e.target.closest('[data-remove]');
     if (!btn) return;
     const leaving = btn.dataset.remove === state.me.uid;
-    if (!window.confirm(leaving ? 'Leave this workspace?' : 'Remove this member? They lose access immediately.')) return;
+    if (!await confirmDialog(leaving ? 'Leave this workspace?' : 'Remove this member? They lose access immediately.', { title: leaving ? 'Leave workspace' : 'Remove member', confirmLabel: leaving ? 'Leave' : 'Remove', danger: true })) return;
     try {
       await request(`/members/${encodeURIComponent(btn.dataset.remove)}`, { method: 'DELETE' });
       showToast(leaving ? 'You left the workspace.' : 'Member removed.');
@@ -149,7 +150,7 @@ export function initTeam({ reloadResults }) {
     e.preventDefault();
     const ids = $('erase-ids').value.split(/[\s,;]+/).filter(Boolean);
     if (!ids.length) return;
-    if (!window.confirm(`Permanently erase ${ids.length} customer(s) from live data and every stored model snapshot?`)) return;
+    if (!await confirmDialog(`Permanently erase ${ids.length} customer(s) from live data and every stored model snapshot?`, { title: 'Erase customers', confirmLabel: 'Erase', danger: true })) return;
     try {
       const r = await post('/privacy/erase', { ids });
       $('erase-ids').value = '';
@@ -174,8 +175,8 @@ export function initTeam({ reloadResults }) {
 
   $('delete-workspace').addEventListener('click', async () => {
     const id = state.me.workspace.id;
-    const typed = window.prompt(`This permanently deletes ALL data in this workspace and destroys its encryption key.\nType the workspace id to confirm:\n${id}`);
-    if (typed !== id) { if (typed !== null) showToast('Workspace id did not match; nothing was deleted.', 'error'); return; }
+    const typed = await typeToConfirm('This permanently deletes ALL data in this workspace and destroys its encryption key. It cannot be undone.', id, { title: 'Delete workspace', confirmLabel: 'Delete workspace' });
+    if (typed !== id) return;
     try { await request('/workspace', { method: 'DELETE', json: { confirm: id } }); location.reload(); }
     catch (err) { showToast(err.message, 'error'); }
   });

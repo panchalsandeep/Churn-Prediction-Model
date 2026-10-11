@@ -1,6 +1,7 @@
 /* Data pipeline (B2B accounts): tables, churn definition, schedule, alert channels, API keys, pull sources. All server-gated by role. */
 import { $, state, escapeHtml, showToast, fmtInt, fmtPct, timeAgo, can, setBusy } from '../lib/ctx.js';
 import { get, post, put, request, runJob } from '../lib/api.js';
+import { confirmDialog, revealSecret } from '../lib/dialog.js';
 
 const ROLE_HELP = {
   accounts: 'account_id, started_at (+ churned_at, contract_end, mrr, seats_licensed, any attributes)',
@@ -74,6 +75,36 @@ export function initPipeline({ reloadResults }) {
   $('pipe-role').addEventListener('change', () => { $('pipe-role-help').textContent = `Columns: ${ROLE_HELP[$('pipe-role').value]}`; });
   $('pipe-role-help').textContent = `Columns: ${ROLE_HELP.accounts}`;
 
+  $('pipe-file').addEventListener('change', guard(async () => {
+    const file = $('pipe-file').files[0];
+    const box = $('pipe-map');
+    if (!file) { box.innerHTML = ''; return; }
+    const form = new FormData();
+    form.append('file', file);
+    const p = await request(`/data/${$('pipe-role').value}/preview`, { method: 'POST', form });
+    const fields = [...p.required, ...p.optional];
+    const cell = f => {
+      const m = p.mapping[f];
+      const conf = p.confidence[f];
+      const tone = m == null ? (p.required.includes(f) ? 'High' : '') : conf >= 0.85 ? 'Low' : 'Medium';
+      return `<tr><td>${escapeHtml(f)}${p.required.includes(f) ? ' *' : ''}</td><td><select data-map="${f}"><option value="">(none)</option>${p.columns.map(c => `<option ${c === m ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('')}</select></td>
+        <td><span class="risk-tag ${tone}">${m == null ? 'not found' : conf >= 0.85 ? 'matched' : 'please check'}</span></td></tr>`;
+    };
+    box.innerHTML = `<p class="muted">${fmtInt(p.rows_in_file)} rows, ${p.columns.length} columns. ${p.problem ? '' : `${fmtInt(p.rows_loadable)} would load.`}</p>
+      ${p.problem ? `<p class="pii-box">${escapeHtml(p.problem)}</p>` : ''}
+      ${p.personal_data_columns.length ? `<p class="pii-box">Personal-data columns will be left out: ${p.personal_data_columns.map(escapeHtml).join(', ')}</p>` : ''}
+      <div class="table-wrapper"><table class="customer-table"><thead><tr><th>We need</th><th>Your column</th><th></th></tr></thead><tbody>${fields.map(cell).join('')}</tbody></table></div>`;
+    const m = {};
+    box.querySelectorAll('select[data-map]').forEach(s => { if (s.value) m[s.dataset.map] = s.value; });
+    $('pipe-mapping').value = JSON.stringify(m);
+  }));
+  $('pipe-map').addEventListener('change', e => {
+    if (!e.target.closest('select[data-map]')) return;
+    const m = {};
+    $('pipe-map').querySelectorAll('select[data-map]').forEach(s => { if (s.value) m[s.dataset.map] = s.value; });
+    $('pipe-mapping').value = JSON.stringify(m);
+  });
+
   $('pipe-upload-form').addEventListener('submit', guard(async () => {
     const file = $('pipe-file').files[0];
     if (!file) throw new Error('Choose a CSV file.');
@@ -84,6 +115,8 @@ export function initPipeline({ reloadResults }) {
     const r = await request(`/data/${$('pipe-role').value}`, { method: 'POST', form });
     showToast(`${fmtInt(r.rows_added)} rows added to ${r.role}.`);
     $('pipe-file').value = '';
+    $('pipe-map').innerHTML = '';
+    $('pipe-mapping').value = '';
   }, loadStatus));
 
   const spec = () => ({ type: $('pipe-type').value, horizon_days: Number($('pipe-horizon').value) });
@@ -107,14 +140,14 @@ export function initPipeline({ reloadResults }) {
     const body = { kind, name: $('chan-name').value, min_severity: $('chan-sev').value, include_accounts: $('chan-accounts').checked };
     if (kind === 'email') body.to = $('chan-target').value.split(',').map(s => s.trim()).filter(Boolean); else body.url = $('chan-target').value.trim();
     const c = await post('/channels', body);
-    if (c.signing_secret) window.prompt('Signing secret (shown once). Use it to verify the X-ChurnSight-Signature header:', c.signing_secret);
+    if (c.signing_secret) await revealSecret('Signing secret, shown once. Use it to verify the X-ChurnSight-Signature header.', c.signing_secret, { title: 'Webhook signing secret' });
     $('chan-target').value = '';
     showToast('Channel added.');
   }, loadChannels));
   $('chan-list').addEventListener('click', guard(async e => {
     const t = e.target.closest('[data-chan-test]'); const d = e.target.closest('[data-chan-del]');
     if (t) { const r = await post(`/channels/${t.dataset.chanTest}/test`, {}); showToast(r.ok ? 'Test notification sent.' : `Failed: ${r.detail}`, r.ok ? 'success' : 'error'); }
-    if (d && window.confirm('Remove this channel?')) await request(`/channels/${d.dataset.chanDel}`, { method: 'DELETE' });
+    if (d && await confirmDialog('Remove this channel? Alerts will stop going there.', { title: 'Remove channel', confirmLabel: 'Remove', danger: true })) await request(`/channels/${d.dataset.chanDel}`, { method: 'DELETE' });
   }, loadChannels));
 
   $('key-form').addEventListener('submit', guard(async () => {
@@ -126,7 +159,7 @@ export function initPipeline({ reloadResults }) {
   }, loadKeys));
   $('key-list').addEventListener('click', guard(async e => {
     const b = e.target.closest('[data-key-revoke]');
-    if (b && window.confirm('Revoke this key? Systems using it stop working immediately.')) await request(`/api-keys/${b.dataset.keyRevoke}`, { method: 'DELETE' });
+    if (b && await confirmDialog('Revoke this key? Systems using it stop working immediately.', { title: 'Revoke key', confirmLabel: 'Revoke', danger: true })) await request(`/api-keys/${b.dataset.keyRevoke}`, { method: 'DELETE' });
   }, loadKeys));
 
   $('src-form').addEventListener('submit', guard(async () => {
@@ -141,6 +174,6 @@ export function initPipeline({ reloadResults }) {
   $('src-list').addEventListener('click', guard(async e => {
     const s = e.target.closest('[data-src-sync]'); const d = e.target.closest('[data-src-del]');
     if (s) { const r = await post(`/sources/${s.dataset.srcSync}/sync`, {}); showToast(r.detail, r.ok ? 'success' : 'error'); }
-    if (d && window.confirm('Remove this source?')) await request(`/sources/${d.dataset.srcDel}`, { method: 'DELETE' });
+    if (d && await confirmDialog('Remove this source? Data already loaded stays.', { title: 'Remove source', confirmLabel: 'Remove', danger: true })) await request(`/sources/${d.dataset.srcDel}`, { method: 'DELETE' });
   }, loadSources, loadStatus));
 }

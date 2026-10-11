@@ -31,7 +31,7 @@ from churn.tenancy import TenancyError  # noqa: E402
 from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
 from churn.jobs import JobRejected  # noqa: E402
-from churn import apikeys, connectors, features, ingest, mlops, notify, pipeline, quotas, shadow  # noqa: E402
+from churn import apikeys, connectors, feedback, features, ingest, mlops, notify, pipeline, quotas, shadow  # noqa: E402
 from churn.quotas import QuotaExceeded  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
@@ -225,6 +225,7 @@ _latency: Counter = Counter()
 @app.before_request
 def _start():
     g.t0 = time.perf_counter()
+    g.ctx_prev = db.workspace_context.get()
     g.rid = observability.clean_request_id(request.headers.get('X-Request-ID'), uuid.uuid4().hex[:12])
 
 
@@ -263,7 +264,7 @@ def _finish(response):
 
 @app.teardown_request
 def _clear_tenant_context(_exc):
-    db.workspace_context.set('')          # a pooled thread must never carry one request's tenant into the next
+    db.workspace_context.set(getattr(g, 'ctx_prev', ''))          # a pooled thread must never carry one request's tenant into the next (server threads start empty)
 
 
 @app.errorhandler(TenancyError)
@@ -464,6 +465,34 @@ def data_upload(role):
     return jsonify(res), 201
 
 
+@app.route('/api/data/<role>/preview', methods=['POST'])
+@require_firebase_auth(role='admin')
+def data_preview(role):
+    """How would this file be read? Suggested column mapping with confidence, what is unmatched, and whether it would load."""
+    from churn import mapping as colmap
+    from churn.schema import detect_pii
+    if role not in ingest.ROLES:
+        return bad_request('Unknown table.')
+    try:
+        df = read_upload()
+    except ValueError as exc:
+        return bad_request(str(exc))
+    sug = colmap.suggest(role, df, ingest.ROLES[role])
+    try:
+        user_map = _mapping_from_form()
+    except ValueError:
+        user_map = {}
+    problem = None
+    try:
+        rows = int(len(ingest.normalize(role, df, {**sug['mapping'], **user_map}, auto=False)))
+    except ingest.IngestError as exc:
+        rows, problem = 0, str(exc)
+    pii = [str(c) for c in df.columns if detect_pii(df[c], str(c))]
+    sample = json.loads(df.drop(columns=pii).head(3).to_json(orient='records', date_format='iso'))
+    return jsonify({**sug, 'columns': [str(c) for c in df.columns], 'rows_in_file': int(len(df)), 'rows_loadable': rows, 'problem': problem,
+                    'personal_data_columns': pii, 'sample': sample, 'required': ingest.ROLES[role]['required'], 'optional': ingest.ROLES[role]['optional']})
+
+
 @app.route('/api/ingest/<role>', methods=['POST'])
 @require_api_key('ingest')
 def data_ingest(role):
@@ -609,6 +638,30 @@ def api_keys():
 @require_firebase_auth(role='admin')
 def api_key_revoke(key_id):
     return (jsonify({'ok': True}), 200) if apikeys.revoke(g.ws, key_id, g.actor) else bad_request('Key not found', 404)
+
+
+# ── Feedback / bug reports ────────────────────────────────────────────────────
+
+@app.route('/api/feedback', methods=['POST'])
+@require_firebase_auth(heavy=True)
+def feedback_submit():
+    try:
+        return jsonify(feedback.submit(g.ws, g.actor, request.get_json(silent=True) or {})), 201
+    except feedback.FeedbackError as exc:
+        return bad_request(str(exc))
+
+
+@app.route('/api/feedback', methods=['GET'])
+@require_firebase_auth(role='admin')
+def feedback_list():
+    return jsonify({'reports': feedback.list_reports(g.ws)})
+
+
+@app.route('/api/feedback/<rid>', methods=['GET'])
+@require_firebase_auth(role='admin')
+def feedback_get(rid):
+    rep = feedback.get_report(g.ws, rid)
+    return jsonify(rep) if rep else bad_request('Report not found', 404)
 
 
 # ── MLOps: realized performance, shadow evaluation, retraining ────────────────

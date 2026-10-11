@@ -125,6 +125,9 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
         <span>Search</span><kbd id="palette-kbd">Ctrl K</kbd>
       </button>
+      <button class="icon-btn" id="bug-btn" type="button" aria-label="Report a problem" title="Report a problem" data-no-capture>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9"/><path d="M9 7.1V6a3 3 0 016 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 014-4h4a4 4 0 014 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9M6.5 13H2M17.5 13H22M6 17l-3 1.5M18 17l3 1.5M6.5 9L3 7.5M17.5 9L21 7.5"/></svg>
+      </button>
       <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false" title="Toggle theme">
         <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
@@ -550,7 +553,8 @@
               <span class="whatif-delta" id="whatif-delta" aria-live="polite"></span>
               <button class="btn-secondary btn-small" id="whatif-reset" type="button">Reset</button>
             </div>
-            <p class="whatif-hint">Drag a lever to re-score this customer live.</p>
+            <p class="whatif-hint">Drag a lever to see how the model's score changes. This shows what the model associates with each factor, not a guaranteed result of acting on it.</p>
+            <p class="whatif-note" id="whatif-note" role="status" hidden></p>
             <div class="whatif-levers" id="whatif-levers"></div>
             <div class="whatif-contract" id="whatif-contract" role="radiogroup" aria-label="Category"></div>
             <h5 class="impact-title">What is driving this score</h5>
@@ -640,7 +644,7 @@
               <select id="pipe-mode" aria-label="Mode"><option value="append">add rows</option><option value="replace">replace table</option></select>
               <input id="pipe-mapping" placeholder='optional column mapping {"account_id":"CustomerRef"}' aria-label="Column mapping" />
               <button class="btn-secondary btn-small" type="submit">Upload</button>
-            </form><small class="muted" id="pipe-role-help"></small></section>
+            </form><div id="pipe-map"></div><small class="muted" id="pipe-role-help"></small></section>
           <section><h4>2 · What does “churned” mean?</h4>
             <div class="pipe-form">
               <select id="pipe-type" aria-label="Definition"><option value="churn_date">Account has a churn date</option><option value="inactivity">No product activity</option></select>
@@ -914,5 +918,24 @@
 </div>
 
 <script type="module" src="src/main.js"></script>
+<div class="capture-frame" id="capture-frame" aria-hidden="true" data-no-capture></div>
+<div class="bug-backdrop" id="bug-backdrop" hidden data-no-capture></div>
+<section class="bug-card" id="bug-card" role="dialog" aria-modal="true" aria-labelledby="bug-title" hidden data-no-capture>
+  <header class="bug-head"><h3 id="bug-title">Report a problem</h3>
+    <button class="icon-btn" id="bug-close" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+  <div id="bug-body">
+    <div class="bug-preview" id="bug-preview"></div>
+    <form id="bug-form">
+      <label class="bug-label" for="bug-msg">What went wrong, or what were you trying to do?</label>
+      <textarea id="bug-msg" rows="4" maxlength="4000" placeholder="For example: the chart on Overview is empty after I upload my file."></textarea>
+      <label class="check bug-include" id="bug-include-row"><input type="checkbox" id="bug-include" checked /><span>Attach this screenshot. It may show customer data that is visible on this page; it is stored encrypted and only your workspace admins can open it.</span></label>
+      <div class="bug-actions"><span class="bug-state" id="bug-state" role="status"></span>
+        <button class="btn-secondary btn-small" id="bug-cancel" type="button">Cancel</button>
+        <button class="btn-primary btn-small" id="bug-send" type="submit">Send report</button></div>
+    </form>
+  </div>
+  <div class="bug-done" id="bug-done" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+    <p><strong>Thanks, we have it.</strong><br /><small>Reference <code id="bug-ref"></code></small></p></div>
+</section>
 </body>
 </html>

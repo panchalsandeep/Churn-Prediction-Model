@@ -40,13 +40,17 @@ export function createWhatIf({ score, render }) {
   let base = null;       // values + result captured when the user pressed Predict
   let current = null;
   let levers = [];
+  let correlated = [];
+  let schemaCorrelated = [];
+  let fieldDefs = [];
   let chipField = null;
   let controller = null;
   const delta = $('whatif-delta');
 
   function pickLevers(fields) {
     const ranked = [...fields].sort((a, b) => a.rank - b.rank);
-    levers = ranked.filter(f => f.kind === 'number' && f.max > f.min).slice(0, 6);
+    correlated = schemaCorrelated;
+    levers = ranked.filter(f => f.kind === 'number' && f.max > f.min && f.actionable !== false).slice(0, 6);   // only things someone could change
     chipField = ranked.find(f => f.kind === 'category' && f.options.length >= 2 && f.options.length <= 5) || null;
   }
 
@@ -82,6 +86,16 @@ export function createWhatIf({ score, render }) {
     }
   }
 
+  /** Warn when a scenario pulls apart features that normally move together: the model has rarely seen that, so the answer is less reliable. */
+  function consistencyNote() {
+    const moved = new Set(levers.filter(l => Math.abs(Number(current[l.name]) - Number(base.values[l.name])) > 0.15 * (l.max - l.min)).map(l => l.name));
+    const pairs = correlated.filter(([a, b]) => (moved.has(a) !== moved.has(b)) && fieldDefs.some(f => f.name === a) && fieldDefs.some(f => f.name === b));
+    const note = $('whatif-note');
+    if (!note) return;
+    note.hidden = !pairs.length;
+    note.textContent = pairs.length ? `Heads up: ${pairs.slice(0, 2).map(([a, b]) => `${humanize(a)} and ${humanize(b)}`).join('; ')} usually move together, but here only one changed. The score is less reliable for a combination like that.` : '';
+  }
+
   function showDelta(result) {
     const diff = +(result.churn_probability - base.result.churn_probability).toFixed(1);
     delta.className = 'whatif-delta';
@@ -109,6 +123,7 @@ export function createWhatIf({ score, render }) {
   function change(key, value) {
     current = { ...current, [key]: value };
     syncControls();
+    consistencyNote();
     rescore();
     explainSoon();
   }
@@ -136,7 +151,9 @@ export function createWhatIf({ score, render }) {
 
   return {
     /** Call after the main form produces a prediction. `fields` is the model's form schema. */
-    start(values, result, fields) {
+    start(values, result, fields, corr = []) {
+      schemaCorrelated = corr;
+      fieldDefs = fields;
       pickLevers(fields);
       buildControls();
       base = { values: { ...values }, result };

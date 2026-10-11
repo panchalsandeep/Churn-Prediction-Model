@@ -12,6 +12,9 @@ import pytest
 from churn import backup, config, crypto, db, registry, service, storage
 
 
+pytestmark = pytest.mark.skipif(bool(os.environ.get('TEST_DATABASE_URL')), reason='file backup/restore is the SQLite path; PostgreSQL uses pg_dump or provider snapshots')
+
+
 @pytest.fixture(scope='module')
 def populated(client, env, demo_csv_bytes):
     res = client.post('/api/upload?wait=1', data={'file': (io.BytesIO(demo_csv_bytes), 'd.csv'), 'algorithm': 'logistic_regression'},

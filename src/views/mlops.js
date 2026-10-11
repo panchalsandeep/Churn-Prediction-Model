@@ -1,6 +1,7 @@
 /* Model operations: realized performance, challenger in shadow, retraining policy, backtest, rollback. Server-gated by role. */
 import { $, escapeHtml, showToast, fmtInt, fmtPct, timeAgo, can, setBusy } from '../lib/ctx.js';
 import { get, post, put, request, runJob } from '../lib/api.js';
+import { confirmDialog } from '../lib/dialog.js';
 
 const HEALTH_TONE = { ok: 'Low', watch: 'Medium', degraded: 'High', insufficient: '' };
 const HEALTH_LABEL = { ok: 'Healthy', watch: 'Watch', degraded: 'Degraded', insufficient: 'Not enough outcomes yet' };
@@ -74,11 +75,11 @@ export function initMlops({ reloadResults }) {
   job('mlops-backtest-btn', '/mlops/backtest', { origins: 4 }, 'Backtesting…', 'Backtest finished.');
 
   $('mlops-rollback').addEventListener('click', async () => {
-    if (!window.confirm('Put the previous champion model back in front of users?')) return;
+    if (!await confirmDialog('Put the previous champion model back in front of users?', { title: 'Roll back', confirmLabel: 'Roll back' })) return;
     try { await post('/mlops/rollback', {}); showToast('Rolled back.'); await loadMlops(); await reloadResults?.(); } catch (err) { showToast(err.message, 'error'); }
   });
   $('mlops-shadow').addEventListener('click', async e => {
-    if (!e.target.closest('#mlops-promote') || !window.confirm('Promote the challenger now without waiting for realized outcomes?')) return;
+    if (!e.target.closest('#mlops-promote') || !await confirmDialog('Promote the challenger now without waiting for realized outcomes?', { title: 'Promote challenger', confirmLabel: 'Promote' })) return;
     try { await post('/mlops/promote', {}); showToast('Challenger promoted.'); await loadMlops(); await reloadResults?.(); } catch (err) { showToast(err.message, 'error'); }
   });
   $('mlops-runs').addEventListener('change', async e => {

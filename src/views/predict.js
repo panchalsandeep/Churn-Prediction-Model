@@ -161,7 +161,7 @@ export function initPredict({ navigate: nav }) {
     try {
       const data = await predictRequest(values);
       renderPrediction(data);
-      whatIf.start(values, data, form.fields);
+      whatIf.start(values, data, form.fields, form.correlated || []);
     } catch (err) {
       showToast(err.message || 'Prediction failed.', 'error');
     } finally {

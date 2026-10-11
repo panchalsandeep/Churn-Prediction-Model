@@ -241,6 +241,22 @@ def _feature_ranges(X: pd.DataFrame, num_cols: list[str], cat_cols: list[str]) -
     return ranges
 
 
+def _correlated_pairs(X: pd.DataFrame, num_cols: list[str], threshold: float = 0.7, limit: int = 20) -> list[list]:
+    """Pairs of numeric features that normally move together. The what-if simulator warns when a scenario pulls them apart."""
+    cols = [c for c in num_cols if X[c].nunique() > 3]
+    if len(cols) < 2:
+        return []
+    sample = X[cols].sample(min(len(X), 20000), random_state=RANDOM_STATE)
+    corr = sample.corr(method='spearman').abs()
+    out = []
+    for i, a in enumerate(cols):
+        for b in cols[i + 1:]:
+            r = corr.loc[a, b]
+            if pd.notna(r) and r >= threshold:
+                out.append([a, b, round(float(r), 2)])
+    return sorted(out, key=lambda p: -p[2])[:limit]
+
+
 def _drift_reference(X: pd.DataFrame, probs: np.ndarray, num_cols: list[str], cat_cols: list[str]) -> dict:
     ref = {'numeric': {}, 'categorical': {}}
     for c in num_cols:
@@ -641,6 +657,7 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
 
     baseline = _baseline(X, num_cols, cat_cols)
     ranges = _feature_ranges(X, num_cols, cat_cols)
+    correlated = _correlated_pairs(X, num_cols)
     ref_X, ref_p = X, p_oof
     if schema.get('time_col') and schema['time_col'] in df.columns:
         # With several snapshots, features that grow with time (tenure, days to renewal) differ between the pooled history and any
@@ -669,7 +686,7 @@ def train_model(df: pd.DataFrame, algorithm: str = 'auto', econ: dict | None = N
     bundle = {
         'model': final_model, 'schema': schema, 'baseline': baseline, 'ranges': ranges,
         'num_cols': num_cols, 'cat_cols': cat_cols, 'cols': cols, 'econ': econ, 'thresholds': thresholds,
-        'importance': importance, 'drift_ref': drift_ref, 'version': 2,
+        'importance': importance, 'drift_ref': drift_ref, 'version': 2, 'correlated': correlated,
         'base_rate': base_rate, 'avg_revenue': avg_rev,
         'null_rates': {c: round(float(X[c].isna().mean()), 4) for c in cols},
         'provenance': provenance(dataset_hash(df), schema_signature(schema)),

@@ -105,6 +105,12 @@ The shipped pipeline (`algorithm='auto'`, random stratified split except where n
 | Bank customers | 10,000 | 20.4% | 86.1 | 69.6 (20.4) | 4.0× |
 | IBM Telco | 7,043 | 26.5% | 84.2 | 66.5 (26.5) | 2.8× |
 
+## Model evaluation, reference models, bug reports
+
+* `python scripts/eval.py [--check|--update-baseline]` records ROC-AUC, PR-AUC, Brier and lift per dataset against a no-skill and a logistic-regression floor, appends to `evals/history.jsonl` and gates CI on `evals/baseline.json` (see [docs/BENCHMARKS.md](docs/BENCHMARKS.md#evaluation-history-and-the-regression-gate)).
+* `models/reference/` holds models trained by the shipped pipeline on the public telco, bank and orange datasets (safe skops format, model cards, test that they load). Re-create with `python scripts/export_reference_models.py`. Workspace models are different: they are encrypted per workspace, never committed, and versioned in the registry, where any version can be promoted or rolled back.
+* The bug icon in the top bar captures the page (edges flash, a card slides in with the screenshot and a message box). Reports are stored encrypted per workspace and listed for admins at `GET /api/feedback`; set `FEEDBACK_WEBHOOK_URL` to forward text and metadata to the operator (the screenshot only with `FEEDBACK_FORWARD_SCREENSHOT=1`).
+
 ## Scale
 
 Designed to be hosted publicly: size-aware training, a bounded job queue with per-workspace limits, SQL paging with cached counts, keyset exports, capped deep paging, results caching, retention limits. Details and the measured 100,000-row run are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md#scale); `scripts/loadtest.py` and `scripts/scale_test.py` reproduce them.

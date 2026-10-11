@@ -1,0 +1,54 @@
+{
+ "name": "churnsight-reference-telco",
+ "dataset": "IBM Telco customer churn sample dataset",
+ "rows": 7043,
+ "target": "Churn",
+ "algorithm": "Gradient Boosting (tuned)",
+ "validation": "random",
+ "trained_with": {
+  "scikit_learn": "1.9.1",
+  "skops": "0.16.0"
+ },
+ "metrics_on_untouched_holdout": {
+  "roc_auc": 84.04,
+  "pr_auc": 65.63,
+  "pr_auc_baseline": 26.54,
+  "brier": 0.1369
+ },
+ "features": [
+  "SeniorCitizen",
+  "tenure",
+  "MonthlyCharges",
+  "TotalCharges",
+  "gender",
+  "Partner",
+  "Dependents",
+  "PhoneService",
+  "MultipleLines",
+  "InternetService",
+  "OnlineSecurity",
+  "OnlineBackup",
+  "DeviceProtection",
+  "TechSupport",
+  "StreamingTV",
+  "StreamingMovies",
+  "Contract",
+  "PaperlessBilling",
+  "PaymentMethod"
+ ],
+ "top_features": [
+  "Contract",
+  "tenure",
+  "InternetService",
+  "OnlineSecurity",
+  "MonthlyCharges",
+  "TechSupport"
+ ],
+ "sha256": "c890a8d7e761fab78e9bd1c26e1701851ca6297efb1ae86172e2fce6cfbfa095",
+ "bytes": 4188703,
+ "limitations": [
+  "Small public dataset: use as an example or a starting point, not as a model for your own customers.",
+  "Probabilities are calibrated for this dataset only; another population needs its own model.",
+  "Loads only with a compatible scikit-learn version (the loader refuses mismatches)."
+ ]
+}

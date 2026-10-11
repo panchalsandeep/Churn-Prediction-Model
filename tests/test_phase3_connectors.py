@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import http.server
 import json
+import os
 import threading
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -102,7 +103,8 @@ def test_json_pagination_nesting_mapping_and_credentials(env, vendor, data):
     acc = connectors.add_source(ws, src(vendor, 'accounts', '/v1/accounts', records_path='data.items', name='crm'), 'me')
     ev = connectors.add_source(ws, src(vendor, 'events', '/v1/events', records_path='items', next_path='meta.next', name='product'), 'me')
     assert 'Bearer' not in json.dumps(connectors.list_sources(ws)) and acc['host'] == '127.0.0.1'      # the token is never returned
-    assert connectors.sync(ws, acc['id'])['ok'] and connectors.sync(ws, ev['id'])['ok']
+    results = [connectors.sync(ws, acc['id']), connectors.sync(ws, ev['id'])]
+    assert all(r['ok'] for r in results), results
     assert len(ingest.load_table(ws, 'accounts')) == len(data['accounts'])
     assert len(ingest.load_table(ws, 'events')) == len(data['events'].drop_duplicates())          # every page was followed
     assert sum('page=' in r for r in vendor.requests) >= len(data['events']) // PAGE
@@ -197,7 +199,6 @@ def test_hands_off_loop_pull_train_schedule_score_and_alert(client, env, auth, v
         job = client.post('/api/pipeline/run?wait=1', json={'algorithm': 'logistic_regression'}, headers=boss).get_json()['job']
         assert job['status'] == 'done' and job['result']['status'] == 'champion'
 
-        import os
         os.environ['SAFEHTTP_ALLOW_LOCAL'] = '1'
         ch = client.post('/api/channels', json={'kind': 'slack', 'url': hook.url, 'min_severity': 'Medium'}, headers=boss)
         assert ch.status_code == 201

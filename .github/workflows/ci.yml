@@ -60,6 +60,17 @@ jobs:
           TEST_DATABASE_URL: postgresql+psycopg://churn_app:churn_app@localhost:5432/churn
         run: python -m pytest tests -q
 
+  evals:
+    name: model evaluation gate (no regression against evals/baseline.json)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.13' }
+      - run: pip install -r requirements-dev.txt
+      # demo and b2b are regenerated offline; the real datasets are checked locally (python scripts/eval.py --check)
+      - run: python scripts/eval.py demo b2b --check
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -85,8 +96,9 @@ jobs:
       - name: JavaScript dependencies (high and critical only)
         run: npm audit --omit=dev --audit-level=high
       - name: Scan the repository and the container image
-        uses: aquasecurity/trivy-action@v0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
+          version: v0.75.0          # the action's default binary release (v0.65.0) can no longer be installed
           scan-type: fs
           scan-ref: .
           severity: HIGH,CRITICAL

@@ -6,6 +6,7 @@
 import { loadFirebase } from './lib/firebase.js';
 import { initTheme, toggleTheme } from './lib/theme.js';
 import { initPalette } from './lib/palette.js';
+import { initFeedback } from './views/feedback.js';
 import { debounce, replay, prefersReducedMotion } from './lib/motion.js';
 import { $, qs, qsa, state, escapeHtml, showToast, emit, fmtPct, can } from './lib/ctx.js';
 import { get, post, ApiError } from './lib/api.js';
@@ -386,6 +387,7 @@ $('gate-invite').addEventListener('submit', async e => {
 
 /* ══════════════════  COMMAND PALETTE  ═════════════════════ */
 initTheme();
+initFeedback();
 initPalette({
   navigate: requestNavigate,
   focusSearch() {

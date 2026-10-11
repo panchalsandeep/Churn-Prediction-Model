@@ -93,6 +93,22 @@ Explanations are the CPU-bound part of serving: scoring a customer under 12 pert
 
 Bugs this testing found and fixed: an uncached dashboard aggregate that took 3.1 s, an ID search that scanned JSON attributes (1.7 s), segments computed by re-parsing every customer's JSON (4.6 s), and an off-by-one in the "large workspace" threshold that kept a 100,000-row workspace on the slow path.
 
+### Evaluation history and the regression gate
+
+`python scripts/eval.py` trains the shipped pipeline (`auto`) on every available dataset, appends the result with the git commit to `evals/history.jsonl`, and with `--check` fails if a metric falls below `evals/baseline.json` by more than its tolerance (PR-AUC 2.0 points, ROC-AUC 1.5, lift 0.3, Brier +0.01). Baselines move only through `--update-baseline`, so a regression is a visible, committed decision. CI runs the offline datasets (`demo`, `b2b`); the public ones (`telco`, `bank`, `orange`) need `scripts/download_datasets.py` and are checked locally.
+
+Baseline recorded on 2026-10-12 (holdout metrics of the shipped pipeline; the logistic-regression floor is a separate random 75/25 split, so compare roughly, not point for point):
+
+| Dataset | Rows | Churn | ROC-AUC | PR-AUC | Brier | Top-decile lift | Logistic floor ROC / PR |
+|---|---|---|---|---|---|---|---|
+| demo (synthetic B2B-style snapshots) | 8,000 | 11.3% | 78.6 | 38.6 | 0.083 | 3.9× | 79.3 / 37.5 |
+| b2b (synthetic accounts, 60-day horizon) | 4,381 | 6.9% | 93.8 | 67.2 | 0.072 | 6.8× | 92.2 / 71.2 |
+| telco | 7,043 | 26.5% | 84.0 | 65.6 | 0.137 | 2.9× | 84.4 / 63.8 |
+| bank | 10,000 | 20.4% | 86.3 | 69.8 | 0.104 | 4.0× | 77.0 / 47.6 |
+| orange | 3,333 | 14.5% | 94.0 | 90.9 | 0.033 | 6.7× | 81.8 / 46.5 |
+
+What this says plainly: on `bank` and `orange` the boosted model adds a lot over a linear one (+22 and +44 PR-AUC points); on `demo`, `telco` and `b2b` it is no better than plain logistic regression within noise, and on `b2b` the floor is nominally higher. The synthetic sets were built with mostly additive effects, which is exactly where a linear model is hard to beat, so they say little about real data. The honest reading is that the extra machinery pays where there are real interactions, and that we should not claim more than that.
+
 ### Phase 1: scaling out
 
 **Several web processes.** Same 100,000-customer workspace, reads-only mix, 40 client threads, SQLite (WAL) shared by all processes, client on the same 12-core machine (so the client competes for CPU):

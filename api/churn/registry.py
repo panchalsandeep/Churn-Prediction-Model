@@ -168,4 +168,5 @@ def wipe(ws: str) -> None:
     storage.get_storage().delete_prefix(storage.upload_prefix(ws))
     storage.get_storage().delete_prefix(storage.table_prefix(ws))
     storage.get_storage().delete_prefix(storage.model_prefix(ws).replace('models/', 'predlog/', 1))
+    storage.get_storage().delete_prefix(storage.model_prefix(ws).replace('models/', 'feedback/', 1))
     forget(ws)
