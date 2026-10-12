@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Admin Console | ChurnSight</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('churnsight-theme');
+        var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    body.console { min-height: 100vh; padding: 32px 16px; background: var(--bg-base); color: var(--text-1); font-family: var(--font); }
+    .console-wrap { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+    .console-login { max-width: 420px; margin: 8vh auto 0; }
+    .console-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .console-head h1 { font-family: var(--font-display); font-weight: 400; font-size: 1.8rem; margin: 0; }
+    .console-sub { color: var(--text-3); font-size: .9rem; margin: 4px 0 0; }
+    .console-msg { margin-top: 14px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: .9rem; }
+    .console-msg.error { background: rgba(194, 59, 59, 0.10); border: 1px solid rgba(194, 59, 59, 0.28); color: var(--red); }
+    .console-msg.success { background: rgba(31, 138, 91, 0.12); border: 1px solid rgba(31, 138, 91, 0.28); color: var(--green); }
+    .console-help { margin-top: 14px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: .85rem; color: var(--text-2); line-height: 1.6; background: var(--tint-1); }
+    .console-form { display: flex; flex-direction: column; gap: 14px; margin-top: 18px; }
+    .console-danger { color: var(--red); border-color: rgba(194, 59, 59, 0.35); }
+    .console-toolbar { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
+  </style>
+</head>
+<body class="console">
+  <main class="console-wrap">
+    <section id="login-view" class="card console-login" hidden>
+      <h1 style="font-family:var(--font-display);font-weight:400;margin:0">Admin Console</h1>
+      <p class="console-sub">Sign in with the admin credentials configured on the server.</p>
+      <form id="login-form" class="console-form">
+        <div class="form-group">
+          <label for="username">Username</label>
+          <input id="username" type="text" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="btn-primary btn-full" id="login-btn">Sign in as admin</button>
+        <div class="forgot-password-row">
+          <button type="button" class="forgot-password-link" id="forgot-btn" aria-expanded="false" aria-controls="forgot-help">Forgot your password?</button>
+        </div>
+      </form>
+      <div id="forgot-help" class="console-help" hidden>
+        The admin password is the <strong>ADMIN_PASSWORD</strong> variable on the server.
+        To reset it, open your hosting dashboard (Railway: project → service → <strong>Variables</strong>),
+        change <strong>ADMIN_PASSWORD</strong> and redeploy. Changing <strong>ADMIN_TOKEN_SECRET</strong> also signs out every open admin session.
+      </div>
+      <div id="login-msg" class="console-msg" hidden role="alert"></div>
+      <p class="console-sub" style="margin-top:18px">Not an administrator? <a href="/">Back to ChurnSight</a></p>
+    </section>
+
+    <section id="disabled-view" class="card console-login" hidden>
+      <h1 style="font-family:var(--font-display);font-weight:400;margin:0">Admin Console</h1>
+      <p class="console-sub">Password sign-in is not configured on this server. Set <strong>ADMIN_PASSWORD</strong> and
+        <strong>ADMIN_TOKEN_SECRET</strong> (32+ characters). Administrators listed in ADMIN_EMAILS can use
+        <a href="/">Settings → User management</a> in the app instead.</p>
+    </section>
+
+    <section id="console-view" hidden>
+      <div class="console-head">
+        <div>
+          <h1>Admin Console</h1>
+          <p class="console-sub" id="console-who"></p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <a class="btn-secondary btn-small" href="/">Open app</a>
+          <button class="btn-secondary btn-small" id="logout-btn" type="button">Sign out</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px">
+        <div class="console-toolbar">
+          <div>
+            <h3 class="card-title" style="margin:0">Users <small class="muted" id="user-count"></small></h3>
+            <p class="console-sub">Firebase accounts. Disabling blocks sign-in; deleting removes the account.</p>
+          </div>
+          <input id="user-search" class="input-search" type="search" placeholder="Search users" aria-label="Search users" />
+        </div>
+        <div class="table-wrapper"><table class="customer-table" id="user-table"><thead><tr>
+          <th>Name</th><th>Email</th><th>Providers</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="user-list"><tr><td class="empty-row" colspan="5">Loading users…</td></tr></tbody></table></div>
+        <div id="console-msg" class="console-msg" hidden role="status"></div>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="src/admin-console.js"></script>
+</body>
+</html>

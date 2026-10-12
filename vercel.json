@@ -28,6 +28,10 @@
       "dest": "/api/index.py"
     },
     {
+      "src": "/admin/?",
+      "dest": "/dist/admin.html"
+    },
+    {
       "src": "/assets/(.*)",
       "headers": {
         "cache-control": "public, max-age=31536000, immutable"

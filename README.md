@@ -77,6 +77,7 @@ Anything tabular with a churn label. Best results come from behavioural features
 
 - **Local/dev:** without Firebase Admin credentials, auth is bypassed and everything runs in the `local` workspace.
 - **Production:** auth **fails closed** (HTTP 503) until Firebase Admin is configured. Set `ADMIN_EMAILS` for admin features.
+- **Admin console (`/admin`, optional):** username + password from `ADMIN_USERNAME` / `ADMIN_PASSWORD`, sessions signed with `ADMIN_TOKEN_SECRET` (32+ characters) and valid for 8 hours. Grants the platform-administrator routes (Firebase user management, workspace provisioning, plans) without a Firebase account. Off unless both variables are set; login is rate-limited and audited under the `_platform` audit chain.
 - **Workspaces** are per account by default (`WORKSPACE_MODE=user`); `domain` shares by company email domain, `shared` is one workspace for everyone.
 
 ## Configuration

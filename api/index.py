@@ -207,10 +207,53 @@ def ensure_role(minimum: str) -> None:
         raise TenancyError(f'This action needs the {minimum} role (you are {g.role}).', 403, 'forbidden_role')
 
 
-def require_admin(f):
-    """Platform administrators (ADMIN_EMAILS / admin claim): Firebase user management and workspace provisioning."""
+# ── Admin console login (ported from feature/admin-login) ────────────────────
+# A second way in for platform administrators: username + password from the environment, answered with a short-lived
+# HMAC-signed token (stateless, so it works with any number of web processes). Disabled unless ADMIN_PASSWORD and a
+# signing secret of at least 32 characters (ADMIN_TOKEN_SECRET, or FLASK_SECRET_KEY) are both set.
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
+ADMIN_TOKEN_TTL_S = int(os.environ.get('ADMIN_TOKEN_TTL_S', str(8 * 3600)))
+ADMIN_LOGIN_PER_MIN = int(os.environ.get('ADMIN_LOGIN_PER_MIN', '5'))          # per client address
+ADMIN_LOGIN_GLOBAL_PER_MIN = int(os.environ.get('ADMIN_LOGIN_GLOBAL_PER_MIN', '30'))  # all addresses together (bounds brute force behind spoofed IPs)
+
+
+def _console_secret() -> bytes:
+    return (os.environ.get('ADMIN_TOKEN_SECRET') or os.environ.get('FLASK_SECRET_KEY') or '').encode()
+
+
+def console_login_enabled() -> bool:
+    return bool(os.environ.get('ADMIN_PASSWORD')) and len(_console_secret()) >= 32
+
+
+def _console_sign(payload: str) -> str:
+    return hmac.new(_console_secret(), payload.encode(), 'sha256').hexdigest()
+
+
+def create_console_token(username: str) -> str:
+    import base64
+    payload = base64.urlsafe_b64encode(json.dumps({'sub': username, 'exp': int(time.time()) + ADMIN_TOKEN_TTL_S}).encode()).decode().rstrip('=')
+    return f'{payload}.{_console_sign(payload)}'
+
+
+def verify_console_token(token: str) -> str | None:
+    """The admin username if the token is genuine and unexpired, else None."""
+    import base64
+    if not token or not console_login_enabled():
+        return None
+    try:
+        payload, sig = token.rsplit('.', 1)
+        if not hmac.compare_digest(sig, _console_sign(payload)):
+            return None
+        data = json.loads(base64.urlsafe_b64decode(payload + '=' * (-len(payload) % 4)))
+        if int(data['exp']) < time.time():
+            return None
+        return str(data['sub'])
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _admin_firebase_check(f):
     @wraps(f)
-    @require_firebase_auth(no_workspace=True)
     def decorated(*args, **kwargs):
         if not auth_configured():
             return f(*args, **kwargs)           # local dev without Firebase
@@ -218,6 +261,39 @@ def require_admin(f):
             return jsonify({'error': 'Forbidden: Admin access required'}), 403
         return f(*args, **kwargs)
     return decorated
+
+
+def require_admin(f):
+    """Platform administrators: Firebase users in ADMIN_EMAILS (or with the admin claim), or the admin console
+    (X-Admin-Token from /api/admin/login). Firebase user management and workspace provisioning."""
+    firebase_path = require_firebase_auth(no_workspace=True)(_admin_firebase_check(f))
+
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.headers.get('X-Admin-Token')
+        if not token:
+            return firebase_path(*args, **kwargs)
+        sub = verify_console_token(token)
+        if not sub:
+            return jsonify({'error': 'Unauthorized: admin session expired or invalid. Sign in again.'}), 401
+        ok, retry = limiter.allow(f'console:{sub}', config.RATE_LIMIT_PER_MIN)
+        if not ok:
+            resp = jsonify({'error': 'Too many requests. Please slow down.'})
+            resp.status_code = 429
+            resp.headers['Retry-After'] = str(retry)
+            return resp
+        request.user = None
+        g.ws, g.role, g.uid, g.email, g.actor = None, None, 'admin-console', None, f'admin-console:{sub}'
+        return f(*args, **kwargs)
+    return decorated
+
+
+PLATFORM_AUDIT_WS = '_platform'        # audit chain for platform-level actions that belong to no workspace
+
+
+def platform_audit(action: str, detail=None) -> None:
+    with db.system_context():
+        db.audit(PLATFORM_AUDIT_WS, g.actor, action, detail)
 
 
 # ── Request plumbing: ids, structured logs, metrics, headers, gzip/etag ──────────
@@ -1037,6 +1113,48 @@ def interventions_summary():
     return jsonify(service.intervention_summary(g.ws))
 
 
+# ── Admin console (username/password) ────────────────────────────────────────
+
+@app.route('/admin', methods=['GET'])
+def admin_console_page():
+    if os.path.isfile(os.path.join(DIST_DIR, 'admin.html')):
+        return send_from_directory(DIST_DIR, 'admin.html')
+    return jsonify({'service': 'ChurnSight API', 'message': 'Admin console is served from the static build (dist/admin.html).'}), 404
+
+
+@app.route('/api/admin/login', methods=['POST'])
+def admin_console_login():
+    if not console_login_enabled():
+        return jsonify({'error': 'Admin console login is not configured on this server.', 'code': 'console_disabled'}), 503
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'anon').split(',')[0].strip()
+    for key, limit in ((f'adminlogin:{ip}', ADMIN_LOGIN_PER_MIN), ('adminlogin:*', ADMIN_LOGIN_GLOBAL_PER_MIN)):
+        ok, retry = limiter.allow(key, limit)
+        if not ok:
+            resp = jsonify({'error': 'Too many sign-in attempts. Wait a minute and try again.'})
+            resp.status_code = 429
+            resp.headers['Retry-After'] = str(retry)
+            return resp
+    body = request.get_json(silent=True) or {}
+    username, password = str(body.get('username', '')).strip(), str(body.get('password', ''))
+    user_ok = hmac.compare_digest(username.lower().encode(), ADMIN_USERNAME.lower().encode())
+    pass_ok = hmac.compare_digest(password.encode(), os.environ.get('ADMIN_PASSWORD', '').encode())
+    g.actor = f"admin-console:{(username or '?')[:60]}"
+    if not (user_ok and pass_ok):
+        log.warning(json.dumps({'event': 'admin_console_login_failed', 'ip': ip, 'rid': g.rid}))
+        return jsonify({'error': 'Invalid admin credentials.'}), 401
+    g.actor = f'admin-console:{ADMIN_USERNAME}'
+    platform_audit('admin.console.login', {'ip': ip})
+    return jsonify({'token': create_console_token(ADMIN_USERNAME), 'expires_in': ADMIN_TOKEN_TTL_S, 'username': ADMIN_USERNAME})
+
+
+@app.route('/api/admin/session', methods=['GET'])
+def admin_console_session():
+    """Is the X-Admin-Token still valid? Also tells the console page whether password login is available at all."""
+    sub = verify_console_token(request.headers.get('X-Admin-Token', ''))
+    return jsonify({'is_admin': bool(sub), 'username': sub, 'enabled': console_login_enabled(),
+                    'firebase_admin_configured': auth_configured()})
+
+
 # ── Admin (Firebase user management) ──────────────────────────────────────────
 
 @app.route('/api/admin/whoami', methods=['GET'])
@@ -1076,7 +1194,7 @@ def admin_update_user(uid):
         auth.delete_user(uid)
     else:
         return bad_request('Invalid action')
-    db.audit(g.ws, g.actor, f'admin.user.{action}', {'uid': uid})
+    platform_audit(f'admin.user.{action}', {'uid': uid})
     return jsonify({'status': 'success', 'action': action})
 
 
