@@ -2,8 +2,19 @@ __pycache__/
 *.pyc
 .DS_Store
 *.pkl
-!api/churn_model.pkl
+
 node_modules/
 dist/
+.data/
+.env
+.env.local
 .vercel/
 .vercel
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Public benchmark datasets are downloaded by scripts/download_datasets.py, never committed
+datasets/raw/
+datasets/ready/

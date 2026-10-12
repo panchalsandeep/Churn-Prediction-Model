@@ -1,0 +1,266 @@
+{
+ "orange": {
+  "rows": 3333,
+  "seconds": 39.8,
+  "winner": "Gradient Boosting (tuned)",
+  "split": "random",
+  "comparison": [
+   {
+    "algorithm": "gradient_boosting",
+    "name": "Gradient Boosting",
+    "cv_pr_auc": 81.49,
+    "cv_std": 1.16
+   },
+   {
+    "algorithm": "gradient_boosting_tuned",
+    "name": "Gradient Boosting (tuned)",
+    "cv_pr_auc": 82.98,
+    "cv_std": 1.58
+   },
+   {
+    "algorithm": "logistic_regression",
+    "name": "Logistic Regression",
+    "cv_pr_auc": 46.0,
+    "cv_std": 2.28
+   },
+   {
+    "algorithm": "random_forest",
+    "name": "Random Forest",
+    "cv_pr_auc": 79.45,
+    "cv_std": 1.3
+   }
+  ],
+  "metrics": {
+   "roc_auc": 94.08,
+   "pr_auc": 90.8,
+   "pr_auc_baseline": 14.54,
+   "brier": 0.0332,
+   "accuracy": 91.3,
+   "precision": 100.0,
+   "recall": 40.21,
+   "f1_score": 57.35,
+   "threshold": 0.9,
+   "base_rate": 14.54,
+   "threshold_f1": 0.4954,
+   "threshold_breakeven": 0.95
+  },
+  "precision_at_k": {
+   "1%": {
+    "precision": 100.0,
+    "recall": 7.22,
+    "customers": 7
+   },
+   "5%": {
+    "precision": 100.0,
+    "recall": 34.02,
+    "customers": 33
+   },
+   "10%": {
+    "precision": 97.01,
+    "recall": 67.01,
+    "customers": 67
+   },
+   "20%": {
+    "precision": 66.17,
+    "recall": 90.72,
+    "customers": 133
+   }
+  },
+  "ci": {
+   "roc_auc": [
+    0.8997,
+    0.9772
+   ],
+   "pr_auc": [
+    0.86,
+    0.9557
+   ]
+  },
+  "lift_top_decile": 6.67,
+  "top_features": [
+   "Total day minutes",
+   "International plan",
+   "Customer service calls",
+   "Total intl calls",
+   "Total intl minutes"
+  ],
+  "personas": 3,
+  "survival_median_months": null
+ },
+ "telco": {
+  "rows": 7043,
+  "seconds": 36.8,
+  "winner": "Gradient Boosting (tuned)",
+  "split": "random",
+  "comparison": [
+   {
+    "algorithm": "gradient_boosting",
+    "name": "Gradient Boosting",
+    "cv_pr_auc": 64.95,
+    "cv_std": 0.8
+   },
+   {
+    "algorithm": "gradient_boosting_tuned",
+    "name": "Gradient Boosting (tuned)",
+    "cv_pr_auc": 66.13,
+    "cv_std": 1.09
+   },
+   {
+    "algorithm": "logistic_regression",
+    "name": "Logistic Regression",
+    "cv_pr_auc": 65.08,
+    "cv_std": 1.78
+   },
+   {
+    "algorithm": "random_forest",
+    "name": "Random Forest",
+    "cv_pr_auc": 65.7,
+    "cv_std": 1.72
+   }
+  ],
+  "metrics": {
+   "roc_auc": 84.21,
+   "pr_auc": 66.45,
+   "pr_auc_baseline": 26.54,
+   "brier": 0.1361,
+   "accuracy": 78.71,
+   "precision": 79.37,
+   "recall": 26.74,
+   "f1_score": 40.0,
+   "threshold": 0.6634,
+   "base_rate": 26.54,
+   "threshold_f1": 0.3471,
+   "threshold_breakeven": 0.1072
+  },
+  "precision_at_k": {
+   "1%": {
+    "precision": 92.86,
+    "recall": 3.48,
+    "customers": 14
+   },
+   "5%": {
+    "precision": 90.0,
+    "recall": 16.84,
+    "customers": 70
+   },
+   "10%": {
+    "precision": 74.47,
+    "recall": 28.07,
+    "customers": 141
+   },
+   "20%": {
+    "precision": 63.48,
+    "recall": 47.86,
+    "customers": 282
+   }
+  },
+  "ci": {
+   "roc_auc": [
+    0.8206,
+    0.862
+   ],
+   "pr_auc": [
+    0.6218,
+    0.7162
+   ]
+  },
+  "lift_top_decile": 2.83,
+  "top_features": [
+   "Contract",
+   "tenure",
+   "InternetService",
+   "MonthlyCharges",
+   "TechSupport"
+  ],
+  "personas": 3,
+  "survival_median_months": null
+ },
+ "bank": {
+  "rows": 10000,
+  "seconds": 28.1,
+  "winner": "Gradient Boosting (tuned)",
+  "split": "random",
+  "comparison": [
+   {
+    "algorithm": "gradient_boosting",
+    "name": "Gradient Boosting",
+    "cv_pr_auc": 69.13,
+    "cv_std": 0.31
+   },
+   {
+    "algorithm": "gradient_boosting_tuned",
+    "name": "Gradient Boosting (tuned)",
+    "cv_pr_auc": 70.31,
+    "cv_std": 0.62
+   },
+   {
+    "algorithm": "logistic_regression",
+    "name": "Logistic Regression",
+    "cv_pr_auc": 47.21,
+    "cv_std": 3.58
+   },
+   {
+    "algorithm": "random_forest",
+    "name": "Random Forest",
+    "cv_pr_auc": 67.56,
+    "cv_std": 1.26
+   }
+  ],
+  "metrics": {
+   "roc_auc": 86.1,
+   "pr_auc": 69.61,
+   "pr_auc_baseline": 20.39,
+   "brier": 0.1039,
+   "accuracy": 82.06,
+   "precision": 98.04,
+   "recall": 12.25,
+   "f1_score": 21.79,
+   "threshold": 0.9,
+   "base_rate": 20.39,
+   "threshold_f1": 0.2522,
+   "threshold_breakeven": 0.95
+  },
+  "precision_at_k": {
+   "1%": {
+    "precision": 100.0,
+    "recall": 4.9,
+    "customers": 20
+   },
+   "5%": {
+    "precision": 96.0,
+    "recall": 23.53,
+    "customers": 100
+   },
+   "10%": {
+    "precision": 80.5,
+    "recall": 39.46,
+    "customers": 200
+   },
+   "20%": {
+    "precision": 62.25,
+    "recall": 61.03,
+    "customers": 400
+   }
+  },
+  "ci": {
+   "roc_auc": [
+    0.8418,
+    0.8806
+   ],
+   "pr_auc": [
+    0.6538,
+    0.7344
+   ]
+  },
+  "lift_top_decile": 3.95,
+  "top_features": [
+   "NumOfProducts",
+   "Age",
+   "IsActiveMember",
+   "Balance",
+   "Geography"
+  ],
+  "personas": 3,
+  "survival_median_months": 10.0
+ }
+}

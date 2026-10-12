@@ -1,0 +1,45 @@
+{
+ "name": "churnsight-reference-bank",
+ "dataset": "Bank customer churn (public Kaggle dataset)",
+ "rows": 10000,
+ "target": "Exited",
+ "algorithm": "Gradient Boosting (tuned)",
+ "validation": "random",
+ "trained_with": {
+  "scikit_learn": "1.9.1",
+  "skops": "0.16.0"
+ },
+ "metrics_on_untouched_holdout": {
+  "roc_auc": 86.31,
+  "pr_auc": 69.84,
+  "pr_auc_baseline": 20.39,
+  "brier": 0.1035
+ },
+ "features": [
+  "CreditScore",
+  "Age",
+  "Tenure",
+  "Balance",
+  "NumOfProducts",
+  "HasCrCard",
+  "IsActiveMember",
+  "EstimatedSalary",
+  "Geography",
+  "Gender"
+ ],
+ "top_features": [
+  "NumOfProducts",
+  "Age",
+  "IsActiveMember",
+  "Geography",
+  "Balance",
+  "Gender"
+ ],
+ "sha256": "a9e15a5c4b3d2d6a8d7a09eff745f1111a8234013c70a2811434f563755922c6",
+ "bytes": 3830560,
+ "limitations": [
+  "Small public dataset: use as an example or a starting point, not as a model for your own customers.",
+  "Probabilities are calibrated for this dataset only; another population needs its own model.",
+  "Loads only with a compatible scikit-learn version (the loader refuses mismatches)."
+ ]
+}

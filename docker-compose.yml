@@ -1,0 +1,47 @@
+# docker compose up --build   ->  http://localhost:8080
+# Scale the stateless parts:     docker compose up --build --scale app=3 --scale worker=2   (put a load balancer in front of app)
+# NOT run during development (Docker was not started); the same settings are exercised without containers by tests/test_phase1_queue.py
+# (separate worker process) and scripts/loadtest_local.py --procs N (several web processes on one database).
+x-app: &app
+  build: .
+  environment: &env
+    DATABASE_URL: postgresql+psycopg://churn:churn@db:5432/churnsight
+    REDIS_URL: redis://redis:6379/0           # shared rate limiting across web processes
+    EMBEDDED_WORKER: "0"                      # jobs run in the worker service, not inside web containers
+    WORKSPACE_MODE: user                      # user | domain | shared
+    FLASK_ENV: production
+    # Production needs a master key (base64, 32 bytes): python -c "from churn.crypto import new_master_key; print(new_master_key())"
+    # CHURN_MASTER_KEY: ...
+    # Production needs Firebase Admin credentials; without them every API call fails closed (HTTP 503).
+    # GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase.json
+    # FIREBASE_PROJECT_ID: your-project
+    # ADMIN_EMAILS: you@company.com
+    # METRICS_TOKEN: ...                       # enables /metrics (send as "Authorization: Bearer ...")
+    # STORAGE_BACKEND: s3                      # blobs on S3 so web and workers need no shared disk
+    # S3_BUCKET: ...
+  volumes: ["blobs:/data"]                    # replace with S3 (above) when web and worker run on different hosts
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_started }
+
+services:
+  app:
+    <<: *app
+    ports: ["8080:8080"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/api/ready').status == 200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  worker:
+    <<: *app
+    command: ["python", "-m", "churn.worker"]
+  db:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: churn, POSTGRES_PASSWORD: churn, POSTGRES_DB: churnsight }
+    volumes: ["pg:/var/lib/postgresql/data"]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U churn"], interval: 3s, timeout: 3s, retries: 20 }
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]     # rate-limit counters only; nothing here is worth persisting
+volumes: { blobs: {}, pg: {} }
