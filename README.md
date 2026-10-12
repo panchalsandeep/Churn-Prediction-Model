@@ -93,6 +93,8 @@ To run workers on their own (any number, same database and blob storage): `EMBED
 
 The image builds the frontend and serves it with the API behind gunicorn. `FLASK_ENV=production` makes auth fail closed, so provide Firebase Admin credentials (see the comments in `docker-compose.yml`) or drop that variable for a local trial.
 
+**Railway:** connect the repo (Dockerfile + `railway.toml`). Add a Postgres plugin, mount a volume at `/data` (or set `STORAGE_BACKEND=s3`), and set `CHURN_MASTER_KEY`, `FIREBASE_SERVICE_ACCOUNT_JSON` (service-account JSON or base64), and `ADMIN_EMAILS`. `DATABASE_URL` from the plugin is accepted as-is (`postgres://` is normalised). Production mode is detected via `RAILWAY_ENVIRONMENT`.
+
 **Vercel** still works for the frontend and light API use, but sklearn + pandas + firebase-admin is close to the function size limit, `/tmp` is per-instance (so models do not persist reliably), and training runs inline. Use a container for real workloads.
 
 ## Benchmarks on real data

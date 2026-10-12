@@ -14,20 +14,45 @@ def _flag(name: str, default: bool = False) -> bool:
 
 
 ON_VERCEL = os.environ.get('VERCEL') == '1'
-PRODUCTION = ON_VERCEL or os.environ.get('FLASK_ENV') == 'production' or _flag('AUTH_FAIL_CLOSED')
+# Railway injects RAILWAY_ENVIRONMENT (and related vars) on every service.
+ON_RAILWAY = bool(os.environ.get('RAILWAY_ENVIRONMENT') or os.environ.get('RAILWAY_PROJECT_ID'))
+PRODUCTION = (
+    ON_VERCEL or ON_RAILWAY
+    or os.environ.get('FLASK_ENV') == 'production'
+    or _flag('AUTH_FAIL_CLOSED')
+)
 # Encrypt per-customer attributes and explanations at rest (breaks substring search over attributes, by design).
 ENCRYPT_FIELDS = _flag('ENCRYPT_FIELDS', PRODUCTION)
 
 
 def data_dir() -> str:
-    """Local .data by default; /tmp on Vercel (ephemeral). Override with DATA_DIR."""
-    path = os.environ.get('DATA_DIR') or ('/tmp/churnsight' if ON_VERCEL else os.path.join(BASE_DIR, '.data'))
+    """Local .data by default; /tmp on Vercel (ephemeral); /data on Railway. Override with DATA_DIR."""
+    if os.environ.get('DATA_DIR'):
+        path = os.environ['DATA_DIR']
+    elif ON_VERCEL:
+        path = '/tmp/churnsight'
+    elif ON_RAILWAY:
+        path = '/data'
+    else:
+        path = os.path.join(BASE_DIR, '.data')
     os.makedirs(path, exist_ok=True)
     return path
 
 
+def normalize_database_url(url: str) -> str:
+    """Accept Heroku/Railway-style postgres URLs and force the psycopg3 SQLAlchemy dialect."""
+    if url.startswith('postgres://'):
+        url = 'postgresql://' + url[len('postgres://'):]
+    if url.startswith('postgresql://') and not url.startswith('postgresql+'):
+        url = 'postgresql+psycopg://' + url[len('postgresql://'):]
+    return url
+
+
 def database_url() -> str:
-    return os.environ.get('DATABASE_URL') or f"sqlite:///{os.path.join(data_dir(), 'churnsight.db').replace(os.sep, '/')}"
+    raw = os.environ.get('DATABASE_URL')
+    if not raw:
+        return f"sqlite:///{os.path.join(data_dir(), 'churnsight.db').replace(os.sep, '/')}"
+    return normalize_database_url(raw)
 
 
 # Uploads

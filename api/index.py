@@ -58,9 +58,15 @@ _origins = [o.strip() for o in os.environ.get('CORS_ORIGINS', '').split(',') if 
 CORS(app, origins=_origins or ([] if is_production() else '*'))
 
 # ── Firebase ──────────────────────────────────────────────────────────────────
+from churn import firebase_creds  # noqa: E402
+
 firebase_initialized = False
 try:
-    firebase_admin.initialize_app()
+    _cred = firebase_creds.credential()
+    if _cred is not None:
+        firebase_admin.initialize_app(_cred)
+    else:
+        firebase_admin.initialize_app()
     firebase_initialized = True
     print('[INFO] Firebase Admin SDK successfully initialized.')
 except Exception as e:  # noqa: BLE001
@@ -70,10 +76,7 @@ ADMIN_EMAILS = [e.strip().lower() for e in os.environ.get('ADMIN_EMAILS', '').sp
 
 
 def auth_configured() -> bool:
-    return bool(
-        firebase_initialized
-        and (os.environ.get('FIREBASE_PROJECT_ID') or os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') or os.environ.get('FIREBASE_CONFIG'))
-    )
+    return bool(firebase_initialized and firebase_creds.credentials_configured())
 
 
 def is_admin_token(decoded_token) -> bool:
