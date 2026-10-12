@@ -284,6 +284,31 @@ function setAuthTab(tab) {
   $('auth-subtitle').textContent = login ? 'Sign in to access your churn prediction workspace' : 'Create an account to train models and run retention playbooks';
   $('submit-btn-text').textContent = login ? 'Sign In' : 'Create Account';
   qs('.auth-title').textContent = login ? 'Welcome back' : 'Join ChurnSight';
+  $('forgot-password-row').hidden = !login;
+}
+
+/** Send a Firebase password-reset email. Same message whether or not the account exists (no account enumeration). */
+async function handleForgotPassword() {
+  if (!fb) { showToast('Sign-in is still loading. Try again in a moment.', 'error'); return; }
+  const email = $('auth-email').value.trim();
+  if (!email) {
+    showToast('Enter your email address first, then click "Forgot your password?".', 'error');
+    $('auth-email').focus();
+    return;
+  }
+  const btn = $('forgot-password-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    await fb.sendPasswordResetEmail(fb.auth, email);
+    showToast(`If an account exists for ${email}, a reset link is on its way. Check your inbox.`);
+  } catch (err) {
+    if (err?.code === 'auth/user-not-found') showToast(`If an account exists for ${email}, a reset link is on its way. Check your inbox.`);
+    else showToast(err?.code === 'auth/invalid-email' ? 'That email address is not valid.' : err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Forgot your password?';
+  }
 }
 
 async function handleEmailAuth(e) {
@@ -338,6 +363,7 @@ async function initAuthUI() {
   $('tab-register').addEventListener('click', () => setAuthTab('register'));
   $('auth-form').addEventListener('submit', handleEmailAuth);
   $('google-login-btn').addEventListener('click', handleGoogleAuth);
+  $('forgot-password-btn').addEventListener('click', handleForgotPassword);
   $('logout-btn').addEventListener('click', handleSignOut);
 
   // The auth card is already interactive; the SDK streams in behind it.

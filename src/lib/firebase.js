@@ -38,6 +38,7 @@ export function loadFirebase() {
       signInWithPopup: authMod.signInWithPopup,
       GoogleAuthProvider: authMod.GoogleAuthProvider,
       signOut: authMod.signOut,
+      sendPasswordResetEmail: authMod.sendPasswordResetEmail,
     };
   })();
   return cached;

@@ -1,4 +1,5 @@
 /* Upload view: schema preview wizard, training (async job with real progress), demo dataset. */
+import { ALGO_DESCRIPTIONS } from '../lib/algoinfo.js';
 import { $, qsa, escapeHtml, showToast, replay, fmtInt } from '../lib/ctx.js';
 import { request, runJob, ApiError } from '../lib/api.js';
 
@@ -142,7 +143,9 @@ export function initUpload({ onTrained }) {
     qsa('.algo-pill').forEach(p => p.classList.remove('active'));
     pill.classList.add('active');
     algorithm = pill.dataset.algo;
+    showAlgoDescription(algorithm);
   }));
+  showAlgoDescription(algorithm);
 
   $('train-btn').addEventListener('click', async () => {
     if (!file || busy) return;
@@ -170,3 +173,11 @@ export function initUpload({ onTrained }) {
   });
 }
 
+/** Explain the selected model family in plain language; 'auto' has no panel. */
+function showAlgoDescription(algo) {
+  const panel = document.getElementById('algo-description');
+  if (!panel) return;
+  const html = ALGO_DESCRIPTIONS[algo] || '';
+  panel.innerHTML = html;          // static, trusted markup from algoinfo.js
+  panel.hidden = !html;
+}
