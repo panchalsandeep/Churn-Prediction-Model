@@ -94,7 +94,9 @@ def test_requests_without_valid_tokens_are_rejected(client, env, auth):
 def test_every_api_route_requires_authentication(client, env, auth):
     """Walks the URL map: nothing under /api may answer an anonymous caller except the explicit public few."""
     import index
-    public = {'/api/health', '/api/ready', '/api/demo.csv'}
+    public = {'/api/health', '/api/ready', '/api/demo.csv',
+              '/api/admin/login',      # the admin console's sign-in itself (rate-limited; tests in test_admin_console.py)
+              '/api/admin/session'}    # only says whether the presented console token is valid
     for rule in index.app.url_map.iter_rules():
         if not rule.rule.startswith('/api/') or rule.rule in public:
             continue
