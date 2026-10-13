@@ -8,7 +8,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/api/health"
+healthcheckPath = "/api/ready"   # database, schema, storage and encryption keys; /api/health only says the process is up
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10

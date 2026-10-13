@@ -32,10 +32,13 @@ COPY requirements.txt requirements-extras.txt ./
 RUN pip install -r requirements.txt -r requirements-extras.txt gunicorn
 COPY api ./api
 COPY --from=web /app/dist ./dist
-RUN useradd -m app && mkdir -p /data && chown app /data
-USER app
-VOLUME ["/data"]
+COPY deploy/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN useradd -m app && mkdir -p /data && chown app /data && chmod 755 /usr/local/bin/entrypoint.sh
+# No VOLUME instruction: Railway rejects Dockerfiles that declare one (attach a Railway volume at /data instead), and
+# docker-compose / Kubernetes mount their own volumes. The entrypoint starts as root only to give /data to `app`,
+# then drops privileges, so the server never runs as root.
 EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 # Web: threads keep one copy of each loaded model per process. Jobs run in-process by default (EMBEDDED_WORKER=1).
 # Raise WEB_CONCURRENCY only when the instance has enough RAM (each worker loads sklearn models).
 # To scale out: EMBEDDED_WORKER=0 on web and run the same image with `python -m churn.worker`.

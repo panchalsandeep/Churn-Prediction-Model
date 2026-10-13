@@ -1360,5 +1360,11 @@ def workspace_delete():
     return jsonify(privacy.delete_workspace(g.ws, g.actor))
 
 
+
+# Start the embedded job workers with the process, not on the first submitted job: otherwise, after a restart or redeploy,
+# queued and interrupted jobs, scheduled pipeline runs and MLOps checks wait until somebody happens to submit a new job.
+if config.EMBEDDED_WORKER and not config.SYNC_JOBS and os.environ.get('START_WORKERS_ON_IMPORT', '1') == '1':
+    jobs.start_embedded()
+
 if __name__ == '__main__':
     app.run(debug=not is_production(), port=int(os.environ.get('PORT', 5050)))
