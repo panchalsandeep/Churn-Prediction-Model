@@ -26,7 +26,10 @@ def allow_local() -> bool:
 def is_public(ip) -> bool:
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
         ip = ip.ipv4_mapped
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
+    # Allow-list globally routable unicast only: a deny-list misses ranges such as 100.64.0.0/10 (shared address space),
+    # which is neither private nor global and may be routed internally by a hosting network.
+    return ip.is_global and not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
+                                 or ip.is_unspecified)
 
 
 def resolve_safe(url: str) -> tuple[str, str, int, str, str]:

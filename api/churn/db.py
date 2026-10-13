@@ -383,7 +383,9 @@ def audit(workspace_id: str, actor: str | None, action: str, detail: Any = None)
     """Append a tamper-evident entry: its hash covers the previous entry's hash, so any edit or deletion breaks the chain."""
     detail_s = dumps(detail) if detail is not None else None
     ts = time.time()
-    with get_engine().begin() as conn:
+    # Scope the transaction to this workspace: callers such as workspace creation and invite acceptance run outside any
+    # request workspace, and on PostgreSQL row-level security would otherwise reject the insert.
+    with workspace_scope(workspace_id), get_engine().begin() as conn:
         if conn.dialect.name == 'postgresql':       # serialise appends per workspace so the chain cannot fork
             conn.execute(sa.text('SELECT pg_advisory_xact_lock(hashtext(:ws))'), {'ws': workspace_id})
         prev = conn.execute(sa.select(audit_t.c.hash).where(audit_t.c.workspace_id == workspace_id)

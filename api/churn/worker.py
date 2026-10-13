@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from . import config, db, handlers, jobs  # noqa: F401  (handlers registers the job kinds)
+from . import config, db, handlers, jobs, pipeline  # noqa: F401  (handlers registers the job kinds; pipeline registers the schedule tick)
 
 
 def main() -> None:

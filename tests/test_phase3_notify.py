@@ -60,7 +60,8 @@ def fresh_channels(client, env):
 
 # ── outbound safety ───────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize('ip', ['127.0.0.1', '10.1.2.3', '192.168.0.9', '172.16.5.5', '169.254.169.254', '::1', 'fe80::1', '0.0.0.0', '::ffff:10.0.0.1'])
+@pytest.mark.parametrize('ip', ['127.0.0.1', '10.1.2.3', '192.168.0.9', '172.16.5.5', '169.254.169.254', '::1', 'fe80::1', '0.0.0.0', '::ffff:10.0.0.1',
+                                '100.64.1.1', '::ffff:100.64.0.1', '198.18.0.1', 'fd12::1'])
 def test_internal_addresses_are_never_public(ip):
     import ipaddress
     assert safehttp.is_public(ipaddress.ip_address(ip)) is False
