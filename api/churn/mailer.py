@@ -199,19 +199,24 @@ def render(kind: str, **c) -> tuple[str, str, str]:
         ws, role, inviter = _e(c['workspace']), _e(ROLE_TEXT.get(c.get('role'), c.get('role', ''))), _e(c.get('inviter') or 'An administrator')
         link = c['link']
         days = c.get('expires_days', 7)
+        # "Acme" -> "the Acme workspace"; "Priya's workspace" stays as is (no "workspace workspace").
+        suffix = '' if c['workspace'].strip().lower().endswith('workspace') else ' workspace'
         subject = f"You're invited to {c['workspace']} on ChurnSight"
         body = (_p(f'Hi {name},')
-                + _p(f'{inviter} has invited you to join the <strong>{ws}</strong> workspace in <strong>ChurnSight</strong>, '
+                + _p(f'{inviter} has invited you to join the <strong>{ws}</strong>{suffix} in <strong>ChurnSight</strong>, '
                      'the platform that predicts which customers are about to churn, explains why, and tracks what your team does about it.')
-                + _info_box([('Workspace', ws, 'text'), ('Your role', role, 'text'), ('Invited email', _e(c['email']), 'email'),
-                             ('Invitation code', _e(c['token']), 'code')])
+                + _info_box([('Workspace', ws, 'text'), ('Your role', role, 'text'), ('Invited email', _e(c['email']), 'email')])
                 + _p(f'Click the button and sign in (or create an account) with <strong>{_e(c["email"])}</strong>. The invitation works once, '
                      f'only for this email address, and expires in {days} days.', 15, MUTED)
-                + _features() + _button('Accept invitation', link))
+                + _features() + _button('Accept invitation', link)
+                + f'<p style="margin:20px 0 4px;text-align:center;font:400 13px/1.5 Helvetica,Arial,sans-serif;color:{MUTED};">'
+                  'Button not working? Sign in, then paste this invitation code when asked:</p>'
+                + f'<p style="margin:0 0 8px;text-align:center;font:600 13px/1.5 \'SFMono-Regular\',Menlo,Consolas,monospace;'
+                  f'color:{INK};word-break:break-all;">{_e(c["token"])}</p>')
         html_ = _layout(f'{c.get("inviter") or "An administrator"} invited you to {c["workspace"]}', "You're invited",
                         f'{ws} &middot; ChurnSight', body,
                         'If you weren’t expecting this invitation, you can ignore this email. Nothing happens unless you accept it.')
-        text = (f"Hi {c.get('name') or 'there'},\n\n{c.get('inviter') or 'An administrator'} has invited you to the {c['workspace']} workspace "
+        text = (f"Hi {c.get('name') or 'there'},\n\n{c.get('inviter') or 'An administrator'} has invited you to the {c['workspace']}{suffix} "
                 f"in ChurnSight as {ROLE_TEXT.get(c.get('role'), c.get('role', ''))}.\n\nAccept: {link}\nInvitation code: {c['token']}\n"
                 f"Sign in with {c['email']}. The invitation works once and expires in {days} days.\n")
     elif kind == 'password_reset':

@@ -142,3 +142,14 @@ def test_password_reset_endpoint_without_mail_tells_browser_to_fall_back(client,
     monkeypatch.delenv('BREVO_API_KEY', raising=False)
     r = client.post('/api/auth/password-reset', json={'email': 'someone@example.com'})
     assert r.status_code == 501 and r.get_json()['code'] == 'email_not_configured'
+
+
+def test_invite_greets_unknown_invitee_and_avoids_double_workspace():
+    from churn import mailer
+    common = dict(email='new@acme.com', name=None, role='analyst', inviter='boss@acme.com', token='tok-XYZ', link='https://a/?invite=tok-XYZ')
+    _, html, text = mailer.render('invite', workspace="Priya's workspace", **common)
+    assert 'Hi there,' in html and 'Hi there,' in text
+    assert 'workspace workspace' not in html and 'workspace workspace' not in text
+    assert 'tok-XYZ' in html and 'Invitation code: tok-XYZ' in text
+    _, html, _ = mailer.render('invite', workspace='Acme', **common)
+    assert '<strong>Acme</strong> workspace' in html
