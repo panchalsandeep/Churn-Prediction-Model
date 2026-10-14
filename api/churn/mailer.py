@@ -2,7 +2,10 @@
 
 Each message is rendered as table-based HTML with inline styles (what Gmail, Outlook and Apple Mail render reliably) plus a
 plain-text alternative, and sent over SMTP using the same settings as the alert channels:
-SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_STARTTLS (1), SMTP_FROM, and APP_URL for links.
+Transport (first one configured wins):
+  BREVO_API_KEY  Brevo transactional email over HTTPS (works on hosts that block outbound SMTP, e.g. Railway Hobby);
+  SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_STARTTLS (1).
+Also: SMTP_FROM (sender address, used by both transports) and APP_URL for links.
 Optional: EMAIL_FROM_NAME (display name, default "ChurnSight"); EMAIL_LOGO_URL / EMAIL_LOGO_REVERSE_URL to override the logo
 images, which default to APP_URL/brand/churnsight-logo-email(-reverse).png served by the app.
 
@@ -11,12 +14,15 @@ Sending never blocks or fails a request: messages go out on a background thread 
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import smtplib
 import ssl
 import threading
 import time
+import urllib.error
+import urllib.request
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 
@@ -48,8 +54,11 @@ FEATURES = [
 ]
 
 
+BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
+
+
 def configured() -> bool:
-    return bool(os.environ.get('SMTP_HOST'))
+    return bool(os.environ.get('BREVO_API_KEY') or os.environ.get('SMTP_HOST'))
 
 
 def app_url() -> str:
@@ -271,19 +280,50 @@ def _smtp_send(to: str, subject: str, html_: str, text: str) -> None:
         s.send_message(m)
 
 
+def _brevo_send(to: str, subject: str, html_: str, text: str) -> None:
+    """Send through Brevo's transactional email API (HTTPS 443). Raises on any non-2xx answer."""
+    payload = {
+        'sender': {'name': os.environ.get('EMAIL_FROM_NAME', 'ChurnSight'), 'email': os.environ.get('SMTP_FROM', '')},
+        'to': [{'email': to}],
+        'subject': subject,
+        'htmlContent': html_,
+        'textContent': text,
+    }
+    req = urllib.request.Request(BREVO_API_URL, data=json.dumps(payload).encode(), method='POST', headers={
+        'api-key': os.environ['BREVO_API_KEY'], 'accept': 'application/json', 'content-type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT_S) as r:  # noqa: S310  fixed https URL
+            if not 200 <= r.status < 300:
+                raise RuntimeError(f'Brevo HTTP {r.status}')
+    except urllib.error.HTTPError as exc:
+        # Brevo explains the problem (unverified sender, bad key, ...) in the body; log its code, never the key.
+        try:
+            detail = json.loads(exc.read() or b'{}').get('code', '')
+        except ValueError:
+            detail = ''
+        raise RuntimeError(f'Brevo HTTP {exc.code} {detail}'.strip()) from None
+
+
+def _deliver(to: str, subject: str, html_: str, text: str) -> None:
+    if os.environ.get('BREVO_API_KEY'):
+        _brevo_send(to, subject, html_, text)
+    else:
+        _smtp_send(to, subject, html_, text)
+
+
 def send(kind: str, to: str, *, background: bool = True, **context) -> bool:
     """Render and send one message. Returns False (and logs) when email is not configured."""
     if not configured() or not to:
-        log.info('email %s not sent (SMTP_HOST not configured)', kind)
+        log.info('email %s not sent (no BREVO_API_KEY or SMTP_HOST configured)', kind)
         return False
     subject, html_, text = render(kind, email=to, **context)
 
     def run():
         try:
-            _smtp_send(to, subject, html_, text)
+            _deliver(to, subject, html_, text)
             log.info('email %s sent', kind)
         except Exception as exc:  # noqa: BLE001  never let mail break the caller
-            log.warning('email %s failed: %s', kind, type(exc).__name__)
+            log.warning('email %s failed: %s %s', kind, type(exc).__name__, exc if isinstance(exc, RuntimeError) else '')
 
     if background:
         threading.Thread(target=run, name=f'mail-{kind}', daemon=True).start()

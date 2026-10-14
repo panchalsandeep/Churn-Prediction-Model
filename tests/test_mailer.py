@@ -35,6 +35,7 @@ def test_user_supplied_values_are_escaped():
 def test_send_is_a_no_op_without_smtp(monkeypatch):
     from churn import mailer
     monkeypatch.delenv('SMTP_HOST', raising=False)
+    monkeypatch.delenv('BREVO_API_KEY', raising=False)
     assert mailer.send('welcome', 'a@b.c', name='A', workspace='W') is False
 
 
@@ -62,6 +63,7 @@ def test_send_uses_smtp_with_html_and_text_parts(monkeypatch):
             sent.append(('msg', m))
 
     monkeypatch.setattr(mailer.smtplib, 'SMTP', FakeSMTP)
+    monkeypatch.delenv('BREVO_API_KEY', raising=False)
     monkeypatch.setenv('SMTP_HOST', 'smtp.example')
     monkeypatch.setenv('SMTP_USER', 'mailer')
     monkeypatch.setenv('SMTP_FROM', 'no-reply@churnsight.example')
@@ -72,7 +74,59 @@ def test_send_uses_smtp_with_html_and_text_parts(monkeypatch):
     assert types == ['text/html', 'text/plain']
 
 
+def test_brevo_api_is_used_when_key_is_set(monkeypatch):
+    import json
+    from churn import mailer
+    calls = []
+
+    class Resp:
+        status = 201
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        calls.append(req)
+        return Resp()
+
+    def no_smtp(*a, **k):
+        raise AssertionError('SMTP must not be used when BREVO_API_KEY is set')
+
+    monkeypatch.setattr(mailer.urllib.request, 'urlopen', fake_urlopen)
+    monkeypatch.setattr(mailer.smtplib, 'SMTP', no_smtp)
+    monkeypatch.setenv('BREVO_API_KEY', 'xkeysib-test')
+    monkeypatch.setenv('SMTP_HOST', 'smtp.example')
+    monkeypatch.setenv('SMTP_FROM', 'no-reply@churnsight.example')
+    assert mailer.configured()
+    assert mailer.send('welcome', 'priya@acme.com', background=False, name='Priya', workspace='W') is True
+    req = calls[0]
+    assert req.full_url == mailer.BREVO_API_URL and req.get_method() == 'POST'
+    assert req.get_header('Api-key') == 'xkeysib-test'
+    body = json.loads(req.data)
+    assert body['to'] == [{'email': 'priya@acme.com'}] and body['sender']['email'] == 'no-reply@churnsight.example'
+    assert body['htmlContent'].startswith('<!doctype html>') and body['textContent'].strip()
+
+
+def test_brevo_error_is_logged_not_raised(monkeypatch, caplog):
+    import io
+    import urllib.error
+    from churn import mailer
+
+    def failing(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 400, 'Bad Request', {}, io.BytesIO(b'{"code":"invalid_parameter"}'))
+
+    monkeypatch.setattr(mailer.urllib.request, 'urlopen', failing)
+    monkeypatch.setenv('BREVO_API_KEY', 'xkeysib-test')
+    with caplog.at_level('WARNING'):
+        assert mailer.send('welcome', 'a@b.c', background=False, name='A', workspace='W') is True
+    assert 'Brevo HTTP 400 invalid_parameter' in caplog.text and 'xkeysib-test' not in caplog.text
+
+
 def test_password_reset_endpoint_without_mail_tells_browser_to_fall_back(client, monkeypatch):
     monkeypatch.delenv('SMTP_HOST', raising=False)
+    monkeypatch.delenv('BREVO_API_KEY', raising=False)
     r = client.post('/api/auth/password-reset', json={'email': 'someone@example.com'})
     assert r.status_code == 501 and r.get_json()['code'] == 'email_not_configured'
