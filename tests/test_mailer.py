@@ -120,9 +120,21 @@ def test_brevo_error_is_logged_not_raised(monkeypatch, caplog):
 
     monkeypatch.setattr(mailer.urllib.request, 'urlopen', failing)
     monkeypatch.setenv('BREVO_API_KEY', 'xkeysib-test')
+    monkeypatch.setenv('SMTP_FROM', 'no-reply@churnsight.example')
     with caplog.at_level('WARNING'):
         assert mailer.send('welcome', 'a@b.c', background=False, name='A', workspace='W') is True
     assert 'Brevo HTTP 400 invalid_parameter' in caplog.text and 'xkeysib-test' not in caplog.text
+
+
+def test_brevo_key_without_sender_is_not_configured(client, monkeypatch):
+    """A half-configured Brevo must keep the endpoints' Firebase fallback instead of silently dropping mail."""
+    from churn import mailer
+    monkeypatch.setenv('BREVO_API_KEY', 'xkeysib-test')
+    monkeypatch.delenv('SMTP_FROM', raising=False)
+    monkeypatch.delenv('SMTP_HOST', raising=False)
+    assert mailer.configured() is False
+    r = client.post('/api/auth/password-reset', json={'email': 'someone@example.com'})
+    assert r.status_code == 501 and r.get_json()['code'] == 'email_not_configured'
 
 
 def test_password_reset_endpoint_without_mail_tells_browser_to_fall_back(client, monkeypatch):

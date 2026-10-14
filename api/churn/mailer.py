@@ -57,8 +57,13 @@ FEATURES = [
 BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email'
 
 
+def _brevo_ready() -> bool:
+    """Brevo needs both the API key and a sender address; with only the key every send would be rejected."""
+    return bool(os.environ.get('BREVO_API_KEY') and os.environ.get('SMTP_FROM'))
+
+
 def configured() -> bool:
-    return bool(os.environ.get('BREVO_API_KEY') or os.environ.get('SMTP_HOST'))
+    return _brevo_ready() or bool(os.environ.get('SMTP_HOST'))
 
 
 def app_url() -> str:
@@ -283,7 +288,7 @@ def _smtp_send(to: str, subject: str, html_: str, text: str) -> None:
 def _brevo_send(to: str, subject: str, html_: str, text: str) -> None:
     """Send through Brevo's transactional email API (HTTPS 443). Raises on any non-2xx answer."""
     payload = {
-        'sender': {'name': os.environ.get('EMAIL_FROM_NAME', 'ChurnSight'), 'email': os.environ.get('SMTP_FROM', '')},
+        'sender': {'name': os.environ.get('EMAIL_FROM_NAME', 'ChurnSight'), 'email': os.environ['SMTP_FROM']},
         'to': [{'email': to}],
         'subject': subject,
         'htmlContent': html_,
@@ -305,7 +310,7 @@ def _brevo_send(to: str, subject: str, html_: str, text: str) -> None:
 
 
 def _deliver(to: str, subject: str, html_: str, text: str) -> None:
-    if os.environ.get('BREVO_API_KEY'):
+    if _brevo_ready():
         _brevo_send(to, subject, html_, text)
     else:
         _smtp_send(to, subject, html_, text)
