@@ -300,7 +300,13 @@ async function handleForgotPassword() {
   btn.disabled = true;
   btn.textContent = 'Sending…';
   try {
-    await fb.sendPasswordResetEmail(fb.auth, email);
+    // Branded email from our server; fall back to Firebase's own email when the server has no mail settings.
+    try {
+      await post('/auth/password-reset', { email });
+    } catch (err) {
+      if (err?.status === 501 || err?.status === 0) await fb.sendPasswordResetEmail(fb.auth, email);
+      else throw err;
+    }
     showToast(`If an account exists for ${email}, a reset link is on its way. Check your inbox.`);
   } catch (err) {
     if (err?.code === 'auth/user-not-found') showToast(`If an account exists for ${email}, a reset link is on its way. Check your inbox.`);
@@ -322,12 +328,26 @@ async function handleEmailAuth(e) {
   $('submit-btn-text').innerHTML = `<span class="spinner-inline"></span> ${activeAuthTab === 'login' ? 'Signing In...' : 'Registering...'}`;
   try {
     if (activeAuthTab === 'login') await fb.signInWithEmailAndPassword(fb.auth, email, password);
-    else await fb.createUserWithEmailAndPassword(fb.auth, email, password);
+    else {
+      const cred = await fb.createUserWithEmailAndPassword(fb.auth, email, password);
+      sendVerificationEmail(cred.user);
+    }
   } catch (err) {
     showToast(err.message, 'error');
     btn.disabled = false;
     $('submit-btn-text').textContent = original;
   }
+}
+
+/** Ask the server for a branded verification email; fall back to Firebase's own email if mail is not configured. */
+async function sendVerificationEmail(user) {
+  if (!user || user.emailVerified) return;
+  try {
+    await post('/auth/send-verification', {});
+  } catch (err) {
+    if (err?.status === 501) { try { await fb.sendEmailVerification(user); } catch { /* best effort */ } }
+  }
+  showToast(`We sent a confirmation link to ${user.email}. Please check your inbox.`);
 }
 
 async function handleGoogleAuth() {

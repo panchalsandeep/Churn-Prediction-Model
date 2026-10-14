@@ -32,6 +32,7 @@ from churn.artifacts import ArtifactError  # noqa: E402
 from churn.crypto import CryptoConfigError, KeyShredded  # noqa: E402
 from churn.jobs import JobRejected  # noqa: E402
 from churn import apikeys, connectors, feedback, features, ingest, mlops, notify, pipeline, quotas, shadow  # noqa: E402
+from churn import mailer  # noqa: E402
 from churn.quotas import QuotaExceeded  # noqa: E402
 from churn.demo_data import generate_demo  # noqa: E402
 from churn.schema import infer_schema  # noqa: E402
@@ -110,6 +111,7 @@ def resolve_context(user) -> dict:
     elif AUTO_PROVISION or is_admin_token(user):
         tenancy.personal_workspace(uid, email)
         chosen = tenancy.memberships_for(uid)[0]
+        _send_first_login_emails(user, email, chosen.get('name'))
     else:
         raise TenancyError('This account has no workspace yet. Ask an administrator to invite you.', 403, 'no_workspace')
 
@@ -120,6 +122,24 @@ def resolve_context(user) -> dict:
     if chosen['role'] in _mfa_roles() and not firebase_claims.get('sign_in_second_factor'):
         raise TenancyError('Multi-factor authentication is required for your role.', 403, 'mfa_required')
     return {'ws': chosen['workspace_id'], 'role': chosen['role'], 'uid': uid, 'email': email, 'sso_required': bool(chosen['sso_required'])}
+
+
+
+def _display_name(user, email: str | None) -> str:
+    name = (user or {}).get('name') or ''
+    return name.split(' ')[0] if name else (email or '').split('@')[0]
+
+
+def _action_settings():
+    """Firebase sends the user back to the app after verifying or resetting."""
+    from firebase_admin import auth as fb_auth
+    return fb_auth.ActionCodeSettings(url=mailer.app_url()) if mailer.app_url() else None
+
+
+def _send_first_login_emails(user, email: str | None, workspace_name: str | None) -> None:
+    """Welcome email when a new personal workspace is created. (The verification email is requested by the sign-up form.)"""
+    if email and mailer.configured():
+        mailer.send('welcome', email, name=_display_name(user, email), workspace=workspace_name)
 
 
 def _client_key() -> str:
@@ -1113,6 +1133,61 @@ def interventions_summary():
     return jsonify(service.intervention_summary(g.ws))
 
 
+# ── Account emails (password reset, email verification) ─────────────────────
+
+PASSWORD_RESET_PER_HOUR = int(os.environ.get('PASSWORD_RESET_PER_HOUR', '5'))   # per email address and per client address
+
+
+@app.route('/api/auth/password-reset', methods=['POST'])
+def auth_password_reset():
+    """Send a branded password-reset email. Same answer whether or not the account exists (no account enumeration).
+    501 email_not_configured tells the browser to fall back to Firebase's own reset email."""
+    if not mailer.configured() or not auth_configured():
+        return jsonify({'error': 'Email is not configured on this server.', 'code': 'email_not_configured'}), 501
+    email = str((request.get_json(silent=True) or {}).get('email', '')).strip().lower()
+    if '@' not in email or len(email) > 254:
+        return bad_request('Enter a valid email address.')
+    ip = request.headers.get('X-Forwarded-For', request.remote_addr or 'anon').split(',')[0].strip()
+    for key in (f'pwreset:ip:{ip}', f'pwreset:email:{email}'):
+        ok, retry = limiter.allow(key, PASSWORD_RESET_PER_HOUR, window=3600)
+        if not ok:
+            resp = jsonify({'error': 'Too many reset requests. Try again later.'})
+            resp.status_code = 429
+            resp.headers['Retry-After'] = str(retry)
+            return resp
+    try:
+        user = auth.get_user_by_email(email)
+        if not user.disabled and any(p.provider_id == 'password' for p in (user.provider_data or [])):
+            link = auth.generate_password_reset_link(email, _action_settings())
+            mailer.send('password_reset', email, name=_display_name({'name': user.display_name}, email), link=link)
+    except auth.UserNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        log.warning('password reset email failed: %s', type(exc).__name__)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/auth/send-verification', methods=['POST'])
+@require_firebase_auth(heavy=True, no_workspace=True)
+def auth_send_verification():
+    """Email a verification link to the signed-in user (after sign-up, or 'resend')."""
+    user = request.user or {}
+    email = (user.get('email') or '').lower()
+    if not email or not auth_configured():
+        return bad_request('No email address on this account.')
+    if user.get('email_verified'):
+        return jsonify({'ok': True, 'already_verified': True})
+    if not mailer.configured():
+        return jsonify({'error': 'Email is not configured on this server.', 'code': 'email_not_configured'}), 501
+    try:
+        link = auth.generate_email_verification_link(email, _action_settings())
+    except Exception as exc:  # noqa: BLE001
+        log.warning('verification link failed: %s', type(exc).__name__)
+        return jsonify({'error': 'Could not create a verification link. Try again later.'}), 502
+    mailer.send('verify_email', email, name=_display_name(user, email), link=link)
+    return jsonify({'ok': True})
+
+
 # ── Admin console (username/password) ────────────────────────────────────────
 
 @app.route('/admin', methods=['GET'])
@@ -1261,7 +1336,17 @@ def members_update(uid):
 def invites_create():
     body = request.get_json(silent=True) or {}
     invite = tenancy.create_invite(g.ws, body.get('email', ''), body.get('role', 'viewer'), g.role, g.actor)
+    ws = tenancy.get_workspace(g.ws) or {}
+    invite['emailed'] = _send_invite_email(invite, ws.get('name') or g.ws, g.email)
     return jsonify(invite), 201          # the token is shown once; only its hash is stored
+
+
+def _send_invite_email(invite: dict, workspace_name: str, inviter: str | None) -> bool:
+    base = mailer.app_url() or request.host_url.rstrip('/')
+    from urllib.parse import quote
+    return mailer.send('invite', invite['email'], name=invite['email'].split('@')[0], workspace=workspace_name, role=invite['role'],
+                       inviter=inviter, token=invite['token'], link=f"{base}/?invite={quote(invite['token'])}",
+                       expires_days=tenancy.INVITE_TTL_DAYS)
 
 
 @app.route('/api/invites', methods=['GET'])
@@ -1295,6 +1380,7 @@ def workspaces_create():
     ws = tenancy.create_workspace(name)
     with db.workspace_scope(ws):
         invite = tenancy.create_invite(ws, body['owner_email'], 'owner', 'owner', getattr(g, 'actor', None))
+    invite['emailed'] = _send_invite_email(invite, name, getattr(g, 'email', None))
     return jsonify({'workspace_id': ws, 'invite': invite}), 201
 
 
