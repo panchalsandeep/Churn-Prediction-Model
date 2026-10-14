@@ -7,22 +7,49 @@
   <meta name="description" content="Predict and prevent customer churn with AI-driven analytics. Upload data, train models, and get actionable insights for Customer Success Managers." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
-  <link rel="stylesheet" href="static/style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <meta name="theme-color" content="#F3EFE6" />
+  <!-- In <head> (not imported from JS) so the very first paint is styled: no flash of unstyled content. -->
+  <link rel="stylesheet" href="/static/style.css" />
+  <script>
+    // Apply the saved/system theme before first paint to avoid a light flash.
+    (function () {
+      try {
+        var saved = localStorage.getItem('churnsight-theme');
+        var dark = saved ? saved === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (dark) document.documentElement.setAttribute('data-theme', 'dark');
+        // A returning user sees one splash while the session is checked, not the login card flashing first.
+        if (localStorage.getItem('churnsight-session')) document.documentElement.classList.add('returning');
+      } catch (e) {}
+    })();
+  </script>
 </head>
-<body>
+<body class="cs-shell app-locked">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <div class="ambient" aria-hidden="true">
+    <span class="ambient-orb ambient-orb--a"></span>
+    <span class="ambient-orb ambient-orb--b"></span>
+    <span class="ambient-grid"></span>
+  </div>
 
 <!-- ═══════════════════════════  SIDEBAR  ═══════════════════════════ -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <div class="logo-icon">
-      <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="url(#lg1)"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="10" r="2.5" fill="#fff"/><defs><linearGradient id="lg1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs></svg>
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <rect width="32" height="32" rx="9" fill="#0B3D4A"/>
+        <path d="M8 20 L13 13 L18 17 L24 10" stroke="#F2E8D5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="24" cy="10" r="2.4" fill="#E8A838"/>
+      </svg>
     </div>
-    <span class="logo-text">ChurnSight</span>
+    <div class="logo-copy">
+      <span class="logo-text">ChurnSight</span>
+      <span class="logo-tag">Retention intelligence</span>
+    </div>
   </div>
 
   <nav class="sidebar-nav" role="navigation" aria-label="Primary navigation">
+    <span class="nav-indicator" id="nav-indicator" aria-hidden="true"></span>
     <a class="nav-item active" data-section="upload" href="#" id="nav-upload" aria-label="Upload and train model">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
       Upload &amp; Train
@@ -33,15 +60,15 @@
     </a>
     <a class="nav-item" data-section="health" href="#" id="nav-health" aria-label="Customer health scores">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20s8-4.35 8-10a6 6 0 00-12 0c0 5.65 8 10 8 10z"/><path d="M9.5 10.5l1.5 1.5 3-3"/></svg>
-      Health Scores
+      Account Health
     </a>
     <a class="nav-item" data-section="cohorts" href="#" id="nav-cohorts" aria-label="Cohort analysis">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19h16"/><path d="M4 15h10"/><path d="M4 11h16"/><path d="M4 7h10"/></svg>
       Cohort Analysis
     </a>
-    <a class="nav-item" data-section="alerts" href="#" id="nav-alerts" aria-label="Alerts and playbooks">
+    <a class="nav-item" data-section="alerts" href="#" id="nav-alerts" aria-label="Alerts and actions">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8a6 6 0 10-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
-      Alerts & Playbooks
+      Alerts & Actions
     </a>
     <a class="nav-item" data-section="analytics" href="#" id="nav-analytics" aria-label="Analytics and model performance">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -51,9 +78,9 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
       Customers
     </a>
-    <a class="nav-item admin-only" data-section="admin" href="#" id="nav-admin" style="display:none" aria-label="Admin console">
+    <a class="nav-item" data-section="admin" href="#" id="nav-admin" aria-label="Workspace settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v4"/><path d="M18.36 5.64l-2.83 2.83"/><path d="M21 12h-4"/><path d="M18.36 18.36l-2.83-2.83"/><path d="M12 21v-4"/><path d="M5.64 18.36l2.83-2.83"/><path d="M3 12h4"/><path d="M5.64 5.64l2.83 2.83"/></svg>
-      Admin
+      Settings
     </a>
     <a class="nav-item" data-section="predict" href="#" id="nav-predict" aria-label="Predict single customer churn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -82,7 +109,7 @@
 </aside>
 
 <!-- ═══════════════════════════  MAIN  ═══════════════════════════ -->
-<main class="main-content">
+<main class="main-content" id="main-content">
 
   <!-- TOP BAR -->
   <header class="topbar">
@@ -94,6 +121,17 @@
     </div>
     <div class="topbar-right">
       <div class="topbar-badge" id="algo-badge" style="display:none"></div>
+      <button class="palette-trigger" id="palette-trigger" type="button" aria-label="Open command palette" aria-keyshortcuts="Control+K Meta+K">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <span>Search</span><kbd id="palette-kbd">Ctrl K</kbd>
+      </button>
+      <button class="icon-btn" id="bug-btn" type="button" aria-label="Report a problem" title="Report a problem" data-no-capture>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2l1.9 1.9M16 2l-1.9 1.9"/><path d="M9 7.1V6a3 3 0 016 0v1.1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 014-4h4a4 4 0 014 4v3c0 3.3-2.7 6-6 6z"/><path d="M12 20v-9M6.5 13H2M17.5 13H22M6 17l-3 1.5M18 17l3 1.5M6.5 9L3 7.5M17.5 9L21 7.5"/></svg>
+      </button>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false" title="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
+      </button>
       <div class="time-display" id="time-display"></div>
     </div>
   </header>
@@ -102,25 +140,28 @@
   <section class="section active" id="section-upload">
     <div class="upload-hero">
       <div class="upload-hero-text">
-        <h2>Train Your Churn Prediction Model</h2>
-        <p>Upload your customer dataset to train an AI model and unlock powerful churn analytics and predictions.</p>
+        <h2>Train a churn model on your data</h2>
+        <p>Drop a CSV with a churn column. ChurnSight detects your schema, compares and tunes several models, calibrates the probabilities and evaluates on a time-aware holdout.</p>
       </div>
     </div>
 
+    <div class="card upload-denied reveal" id="upload-denied" hidden>
+      <h3 class="card-title">Training is for admins</h3>
+      <p>Your role can explore results but not upload data or train models. Ask a workspace admin, or open <strong>Overview</strong> to see the current model.</p>
+    </div>
     <div class="upload-grid">
-      <!-- Upload Card -->
-      <div class="card upload-card">
+      <div class="card upload-card" data-min-role="admin">
         <h3 class="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
-          Upload Dataset
+          Upload dataset
         </h3>
 
-        <div class="drop-zone" id="drop-zone">
+        <div class="drop-zone" id="drop-zone" tabindex="0" role="button" aria-label="Choose a CSV file to upload">
           <div class="drop-zone-icon">
-            <svg viewBox="0 0 64 64" fill="none"><rect x="8" y="8" width="48" height="48" rx="8" fill="url(#dz1)" opacity="0.15"/><polyline points="32 20 32 44" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><polyline points="22 30 32 20 42 30" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="48" x2="44" y2="48" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><defs><linearGradient id="dz1" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient><linearGradient id="dz2" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs></svg>
+            <svg viewBox="0 0 64 64" fill="none"><rect x="8" y="8" width="48" height="48" rx="8" fill="url(#dz1)" opacity="0.18"/><polyline points="32 20 32 44" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><polyline points="22 30 32 20 42 30" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><line x1="20" y1="48" x2="44" y2="48" stroke="url(#dz2)" stroke-width="3" stroke-linecap="round"/><defs><linearGradient id="dz1" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#0B3D4A"/><stop offset="1" stop-color="#E8A838"/></linearGradient><linearGradient id="dz2" x1="8" y1="8" x2="56" y2="56"><stop stop-color="#147A7A"/><stop offset="1" stop-color="#0B3D4A"/></linearGradient></defs></svg>
           </div>
           <p class="drop-text">Drag &amp; drop your CSV here</p>
-          <p class="drop-sub">or click to browse files</p>
+          <p class="drop-sub">or click to browse · up to 25&nbsp;MB</p>
           <input type="file" id="file-input" accept=".csv" hidden />
         </div>
 
@@ -130,199 +171,226 @@
             <span class="file-name" id="file-name-display"></span>
             <span class="file-size" id="file-size-display"></span>
           </div>
-          <button class="remove-file" id="remove-file">✕</button>
+          <button class="remove-file" id="remove-file" type="button" aria-label="Remove file">✕</button>
+        </div>
+
+        <div class="schema-preview" id="schema-preview" hidden aria-live="polite"></div>
+        <div class="form-group exclude-row">
+          <label for="exclude-columns">Never use these columns <small>(comma-separated; optional)</small></label>
+          <input type="text" id="exclude-columns" placeholder="e.g. internal_notes, sales_rep" autocomplete="off" />
         </div>
 
         <div class="algo-select-group">
-          <label class="input-label">Algorithm</label>
+          <label class="input-label">Model</label>
           <div class="algo-pills" id="algo-pills">
-            <button class="algo-pill active" data-algo="random_forest">Random Forest</button>
-            <button class="algo-pill" data-algo="gradient_boosting">Gradient Boosting</button>
-            <button class="algo-pill" data-algo="logistic_regression">Logistic Regression</button>
+            <button class="algo-pill active" data-algo="auto" type="button">Auto · best of several</button>
+            <button class="algo-pill" data-algo="gradient_boosting" type="button">Gradient Boosting</button>
+            <button class="algo-pill" data-algo="logistic_regression" type="button">Logistic Regression</button>
+            <button class="algo-pill" data-algo="random_forest" type="button">Random Forest</button>
           </div>
+          <div id="algo-description" class="algo-description" hidden aria-live="polite"></div>
         </div>
 
-        <button class="btn-primary btn-full" id="train-btn" disabled>
+        <button class="btn-primary btn-full" id="train-btn" type="button" data-min-role="admin" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Train Model
+          Train model
         </button>
+        <div class="or-divider"><span>or</span></div>
+        <button class="btn-secondary btn-full" id="demo-btn" type="button" data-min-role="admin">Try the demo dataset · 8,000 SaaS customers</button>
 
-        <div class="progress-wrap" id="progress-wrap" style="display:none">
+        <div class="progress-wrap" id="progress-wrap" hidden aria-live="polite">
           <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
-          <span class="progress-label" id="progress-label">Processing…</span>
+          <div class="progress-row"><span class="progress-label" id="progress-label">Starting…</span><span class="progress-pct" id="progress-pct">0%</span></div>
         </div>
       </div>
 
-      <!-- CSV Format Guide -->
       <div class="card format-card">
         <h3 class="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-          Required CSV Format
+          How ChurnSight reads your data
         </h3>
-        <p class="format-desc">Your CSV must include the following columns:</p>
-        <div class="columns-grid">
-          <div class="col-item required"><span class="col-badge num">NUM</span> age</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> tenure_months</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> monthly_charges</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> total_charges</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> num_products</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> num_logins_last30</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> support_tickets</div>
-          <div class="col-item required"><span class="col-badge num">NUM</span> last_login_days</div>
-          <div class="col-item required"><span class="col-badge cat">CAT</span> gender</div>
-          <div class="col-item required"><span class="col-badge cat">CAT</span> location</div>
-          <div class="col-item required"><span class="col-badge cat">CAT</span> contract_type</div>
-          <div class="col-item required"><span class="col-badge cat">CAT</span> payment_method</div>
-          <div class="col-item required"><span class="col-badge tgt">TGT</span> churn (0 or 1)</div>
-          <div class="col-item optional"><span class="col-badge opt">OPT</span> customer_id</div>
-        </div>
+        <ul class="read-list">
+          <li><strong>One requirement:</strong> a churn column (<code>churn</code>, <code>Churn</code>, <code>Exited</code>…) with 0/1 or Yes/No.</li>
+          <li><strong>Everything else is detected:</strong> customer ID, dates, numeric and categorical features. Telco, bank and SaaS exports all work as-is.</li>
+          <li><strong>Honest evaluation:</strong> with a snapshot date the holdout is the <em>latest</em> 20% in time, like production. Otherwise a stratified split.</li>
+          <li><strong>Revenue-aware:</strong> include a column such as <code>monthly_charges</code> or <code>mrr</code> to rank accounts by revenue at risk.</li>
+          <li><strong>Better with behaviour:</strong> rolling usage, ticket and payment signals beat static profile fields by a wide margin.</li>
+        </ul>
         <a class="btn-secondary btn-full" id="download-sample" href="/sample_data.csv" download>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download Sample CSV
+          Download demo CSV
         </a>
       </div>
     </div>
-
-    <!-- Error / Success Toast -->
-    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
   </section>
 
   <!-- ── SECTION: OVERVIEW ── -->
   <section class="section" id="section-overview">
-    <div class="kpi-grid" id="kpi-grid">
-      <div class="kpi-card" id="kpi-total" data-risk="All">
-        <div class="kpi-icon purple"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-total-val">–</span><span class="kpi-label">Total Customers</span></div>
-      </div>
-      <div class="kpi-card" id="kpi-churn">
-        <div class="kpi-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-churn-val">–</span><span class="kpi-label">Churn Rate</span></div>
-      </div>
-      <div class="kpi-card" id="kpi-high" data-risk="High">
-        <div class="kpi-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-high-val">–</span><span class="kpi-label">High Risk</span></div>
-      </div>
-      <div class="kpi-card" id="kpi-acc">
-        <div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-acc-val">–</span><span class="kpi-label">Model Accuracy</span></div>
-      </div>
-      <div class="kpi-card" id="kpi-f1">
-        <div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-f1-val">–</span><span class="kpi-label">F1 Score</span></div>
-      </div>
-      <div class="kpi-card" id="kpi-auc">
-        <div class="kpi-icon indigo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
-        <div class="kpi-content"><span class="kpi-value" id="kpi-auc-val">–</span><span class="kpi-label">AUC-ROC</span></div>
+    <div class="overview-hero reveal">
+      <div>
+        <p class="eyebrow">Portfolio pulse</p>
+        <h2 class="display-title">Where retention needs attention</h2>
+        <p class="lede" id="overview-lede">Train a model to unlock live risk, holdout metrics, and action cues.</p>
       </div>
       <div class="section-actions">
-        <button class="btn-secondary" id="retrain-btn">Retrain Model</button>
+        <button class="btn-secondary" id="retrain-btn" type="button" data-min-role="admin">Retrain model</button>
+        <button class="btn-primary" id="export-overview-btn" type="button" data-min-role="analyst">Export risk CSV</button>
+      </div>
+    </div>
+
+    <div class="insights-strip reveal" id="insights-strip" aria-live="polite">
+      <article class="insight-tile">
+        <span class="insight-label">Revenue at risk (high-risk accounts)</span>
+        <strong class="insight-value" id="insight-revenue">–</strong>
+        <span class="insight-meta" id="insight-revenue-meta">Expected loss over the planning horizon</span>
+      </article>
+      <article class="insight-tile">
+        <span class="insight-label">Top churn driver</span>
+        <strong class="insight-value" id="insight-driver">–</strong>
+        <span class="insight-meta" id="insight-driver-meta">From permutation importance on the holdout</span>
+      </article>
+      <article class="insight-tile">
+        <span class="insight-label">Next best action</span>
+        <strong class="insight-value insight-value--sm" id="insight-action">Train to generate playbook cues</strong>
+        <span class="insight-meta" id="insight-action-meta">Based on expected value of outreach</span>
+      </article>
+    </div>
+
+    <div class="kpi-grid" id="kpi-grid">
+      <div class="kpi-card reveal" id="kpi-total" data-risk="All" style="--delay:0">
+        <div class="kpi-icon accent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-total-val">–</span><span class="kpi-label">Customers scored</span><span class="kpi-sub" id="kpi-total-sub"></span></div>
+      </div>
+      <div class="kpi-card reveal" id="kpi-avg" style="--delay:1">
+        <div class="kpi-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-avg-val">–</span><span class="kpi-label">Avg predicted risk</span><span class="kpi-sub" id="kpi-avg-sub"></span></div>
+      </div>
+      <div class="kpi-card reveal" id="kpi-high" data-risk="High" style="--delay:2">
+        <div class="kpi-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-high-val">–</span><span class="kpi-label">High-risk accounts</span><span class="kpi-sub" id="kpi-high-sub"></span></div>
+      </div>
+      <div class="kpi-card reveal" id="kpi-auc" style="--delay:3">
+        <div class="kpi-icon teal"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-auc-val">–</span><span class="kpi-label">ROC-AUC</span><span class="kpi-sub" id="kpi-auc-sub"></span></div>
+      </div>
+      <div class="kpi-card reveal" id="kpi-pr" style="--delay:4">
+        <div class="kpi-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-pr-val">–</span><span class="kpi-label">PR-AUC</span><span class="kpi-sub" id="kpi-pr-sub"></span></div>
+      </div>
+      <div class="kpi-card reveal" id="kpi-p10" style="--delay:5">
+        <div class="kpi-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg></div>
+        <div class="kpi-content"><span class="kpi-value" id="kpi-p10-val">–</span><span class="kpi-label">Precision @ top 10%</span><span class="kpi-sub" id="kpi-p10-sub"></span></div>
       </div>
     </div>
 
     <div class="charts-row">
-      <div class="card chart-card">
-        <h3 class="card-title">Churn Rate Trend</h3>
-        <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+      <div class="card chart-card reveal">
+        <h3 class="card-title">Lift by risk decile</h3>
+        <p class="card-subtitle" id="lift-note">Customers ranked by predicted risk, then bucketed into tenths. Bars show the real churn rate on the holdout.</p>
+        <div class="chart-wrap"><canvas id="liftChart" aria-label="Churn rate by risk decile"></canvas></div>
       </div>
-      <div class="card chart-card">
-        <h3 class="card-title">Risk Distribution</h3>
+      <div class="card chart-card reveal">
+        <h3 class="card-title">Risk distribution</h3>
         <div class="chart-wrap chart-wrap--sm"><canvas id="riskDonutChart"></canvas></div>
         <div class="donut-legend" id="donut-legend"></div>
       </div>
     </div>
+
+    <div class="charts-row charts-row--even">
+      <div class="card reveal">
+        <div class="card-title-row">
+          <h3 class="card-title">Where revenue is most at risk</h3>
+          <select id="segment-attr" class="mini-select" aria-label="Segment attribute"></select>
+        </div>
+        <div class="table-wrapper"><table class="customer-table compact" id="segments-table"><thead><tr>
+          <th>Segment</th><th>Customers</th><th>Avg risk</th><th>High risk</th><th>Expected loss</th></tr></thead>
+          <tbody id="segments-body"><tr><td colspan="5" class="empty-row">No segments yet.</td></tr></tbody></table></div>
+      </div>
+      <div class="card reveal">
+        <h3 class="card-title">Model snapshot</h3>
+        <dl class="snapshot" id="model-snapshot"></dl>
+      </div>
+    </div>
   </section>
 
-  <!-- ── SECTION: HEALTH SCORES ── -->
+  <!-- ── SECTION: HEALTH ── -->
   <section class="section" id="section-health">
     <div class="health-header">
       <div class="health-summary">
-        <div class="health-kpi">
-          <span class="health-kpi-label">Avg Health Score</span>
-          <span class="health-kpi-value" id="health-avg-score">–</span>
-        </div>
-        <div class="health-kpi">
-          <span class="health-kpi-label">Critical Accounts</span>
-          <span class="health-kpi-value" id="health-critical-count">–</span>
-        </div>
-        <div class="health-kpi">
-          <span class="health-kpi-label">Improving Accounts</span>
-          <span class="health-kpi-value" id="health-improving-count">–</span>
-        </div>
+        <div class="health-kpi"><span class="health-kpi-label">Avg health score</span><span class="health-kpi-value" id="health-avg-score">–</span></div>
+        <div class="health-kpi"><span class="health-kpi-label">Critical accounts</span><span class="health-kpi-value" id="health-critical-count">–</span></div>
+        <div class="health-kpi"><span class="health-kpi-label">Worth contacting now</span><span class="health-kpi-value" id="health-actionable-count">–</span></div>
+        <div class="health-kpi"><span class="health-kpi-label">Net value if contacted</span><span class="health-kpi-value" id="health-net-value">–</span></div>
       </div>
       <div class="health-actions">
         <div class="risk-filters health-filters" id="health-risk-filters">
-          <button class="risk-filter active" data-filter="All">All</button>
-          <button class="risk-filter high" data-filter="High">High Risk</button>
-          <button class="risk-filter medium" data-filter="Medium">Medium</button>
-          <button class="risk-filter low" data-filter="Low">Low Risk</button>
+          <button class="risk-filter active" data-filter="All" type="button">All</button>
+          <button class="risk-filter high" data-filter="High" type="button">High risk</button>
+          <button class="risk-filter medium" data-filter="Medium" type="button">Medium</button>
+          <button class="risk-filter low" data-filter="Low" type="button">Low risk</button>
         </div>
       </div>
     </div>
+    <p class="card-subtitle health-note-top">Health = 100 − predicted churn probability. Accounts are ranked by expected revenue loss, so the most valuable at-risk customers come first.</p>
     <div class="health-grid" id="health-grid">
-      <div class="health-card empty-card">
-        <p>No health score data yet. Train a model to populate this view.</p>
-      </div>
+      <div class="health-card empty-card"><p>No data yet. Train a model to populate this view.</p></div>
     </div>
+    <div class="load-more"><button class="btn-secondary" id="health-more" type="button" hidden>Show more accounts</button></div>
   </section>
 
-  <!-- ── SECTION: COHORT ANALYSIS ── -->
+  <!-- ── SECTION: COHORTS ── -->
   <section class="section" id="section-cohorts">
     <div class="cohort-toolbar">
       <div class="cohort-selector">
-        <label for="cohort-type">Cohort type</label>
-        <select id="cohort-type">
-          <option value="signup">Signup Month</option>
-          <option value="contract">Contract Type</option>
-          <option value="location">Location</option>
-        </select>
+        <label for="cohort-type">Group by</label>
+        <select id="cohort-type"></select>
       </div>
-      <div class="cohort-summary" id="cohort-summary">Select a cohort type to view retention details.</div>
+      <div class="alert-tabs" id="cohort-metric" role="group" aria-label="Metric">
+        <button class="alert-tab active" data-metric="rate" type="button">Actual churn rate</button>
+        <button class="alert-tab" data-metric="risk" type="button">Predicted risk</button>
+      </div>
+      <div class="cohort-summary" id="cohort-summary">Select a grouping to view cohort details.</div>
     </div>
     <div class="cohort-grid">
       <div class="card cohort-heatmap-card">
-        <h3 class="card-title">Retention Heatmap</h3>
-        <div class="heatmap-grid" id="heatmap-grid">
-          <div class="empty-card">No cohort data yet. Train a model to generate cohort insights.</div>
-        </div>
+        <h3 class="card-title">Churn by cohort × tenure band</h3>
+        <div class="heatmap-scroll"><div class="heatmap-grid" id="heatmap-grid">
+          <div class="empty-card">No cohort data yet.</div>
+        </div></div>
+        <p class="card-subtitle">Cells need at least 10 customers. Values come from the labelled data, not an estimate.</p>
       </div>
-      <div class="card cohort-charts-card">
-        <div class="cohort-chart-row">
-          <div class="card chart-card">
-            <h3 class="card-title">Retention Curve</h3>
-            <div class="chart-wrap"><canvas id="cohortTrendChart"></canvas></div>
-          </div>
-          <div class="card chart-card">
-            <h3 class="card-title">By Contract Type</h3>
-            <div class="chart-wrap"><canvas id="contractChart"></canvas></div>
-          </div>
-        </div>
+      <div class="card chart-card">
+        <h3 class="card-title" id="survival-title">Retention by tenure</h3>
+        <p class="card-subtitle" id="survival-note"></p>
+        <div class="chart-wrap"><canvas id="cohortTrendChart"></canvas></div>
       </div>
+    </div>
+    <div class="card personas-card reveal">
+      <h3 class="card-title">Customer personas</h3>
+      <p class="card-subtitle">Groups found automatically by clustering customer behaviour, independent of the churn label. Ranked by how often they churn.</p>
+      <div class="personas-grid" id="personas-grid"><div class="empty-card">Personas appear after training.</div></div>
     </div>
   </section>
 
-  <!-- ── SECTION: ALERTS & PLAYBOOKS ── -->
+  <!-- ── SECTION: ALERTS ── -->
   <section class="section" id="section-alerts">
     <div class="alerts-toolbar">
-      <div class="alert-tabs" id="alert-tabs">
-        <button class="alert-tab active" data-tab="Open">Open</button>
-        <button class="alert-tab" data-tab="Acknowledged">Acknowledged</button>
-        <button class="alert-tab" data-tab="Resolved">Resolved</button>
-        <button class="alert-tab" data-tab="Playbooks">Playbooks</button>
+      <div class="alert-tabs" id="alert-tabs" role="tablist">
+        <button class="alert-tab active" data-tab="Open" type="button">Open <span class="tab-count" id="count-Open">0</span></button>
+        <button class="alert-tab" data-tab="Acknowledged" type="button">Acknowledged <span class="tab-count" id="count-Acknowledged">0</span></button>
+        <button class="alert-tab" data-tab="Resolved" type="button">Resolved <span class="tab-count" id="count-Resolved">0</span></button>
       </div>
-      <div class="alert-summary" id="alert-summary">Review active customer alerts and playbooks.</div>
+      <div class="alert-summary" id="alert-summary">Review active customer alerts.</div>
     </div>
     <div class="alerts-layout">
       <div class="card alerts-list-card">
         <h3 class="card-title">Alerts</h3>
-        <div id="alerts-list" class="alerts-list">
-          <div class="empty-card">No alerts available yet.</div>
-        </div>
+        <div id="alerts-list" class="alerts-list"><div class="empty-card">No alerts available yet.</div></div>
       </div>
       <div class="card playbooks-card">
-        <h3 class="card-title">Playbooks</h3>
-        <div id="playbooks-list" class="playbooks-list">
-          <div class="empty-card">Playbooks will appear here when alerts are present.</div>
-        </div>
+        <h3 class="card-title">Closed-loop results</h3>
+        <p class="card-subtitle">Log what your team did for each customer and what happened. This is the data that will let uplift models learn which actions actually save accounts.</p>
+        <div id="loop-summary" class="loop-summary"><div class="empty-card">No actions logged yet. Open a customer and log an outreach.</div></div>
       </div>
     </div>
   </section>
@@ -331,59 +399,57 @@
   <section class="section" id="section-analytics">
     <div class="analytics-grid">
       <div class="card chart-card">
-        <h3 class="card-title">Churn Probability Distribution</h3>
-        <div class="chart-wrap"><canvas id="probDistChart"></canvas></div>
+        <h3 class="card-title">Cumulative gain</h3>
+        <p class="card-subtitle">Share of all churners found by contacting the riskiest X% of customers.</p>
+        <div class="chart-wrap"><canvas id="gainChart"></canvas></div>
       </div>
       <div class="card chart-card">
-        <h3 class="card-title">ROC Curve</h3>
+        <h3 class="card-title">Calibration</h3>
+        <p class="card-subtitle">When the model says 30%, about 30% should churn. Points near the diagonal mean trustworthy probabilities.</p>
+        <div class="chart-wrap"><canvas id="calibrationChart"></canvas></div>
+      </div>
+      <div class="card chart-card">
+        <h3 class="card-title">ROC curve</h3>
+        <p class="card-subtitle" id="roc-note"></p>
         <div class="chart-wrap"><canvas id="rocChart"></canvas></div>
       </div>
       <div class="card chart-card">
-        <h3 class="card-title">Top Feature Importance</h3>
+        <h3 class="card-title">What drives churn</h3>
+        <p class="card-subtitle">Permutation importance: how much holdout PR-AUC drops when a feature is shuffled.</p>
         <div class="chart-wrap"><canvas id="featureChart"></canvas></div>
       </div>
+      <div class="card chart-card">
+        <h3 class="card-title">Score distribution</h3>
+        <div class="chart-wrap"><canvas id="scoreDistChart"></canvas></div>
+      </div>
       <div class="card metrics-card">
-        <h3 class="card-title">Model Performance</h3>
+        <div class="card-title-row">
+          <h3 class="card-title">Model performance</h3>
+          <div class="alert-tabs" id="op-toggle" role="group" aria-label="Operating point">
+            <button class="alert-tab active" data-op="economic" type="button">Business threshold</button>
+            <button class="alert-tab" data-op="f1" type="button">Best F1</button>
+          </div>
+        </div>
         <div class="metrics-grid" id="metrics-detail-grid">
-          <div class="metric-ring-wrap">
-            <div class="metric-ring" id="ring-accuracy">
-              <canvas id="ringAccCanvas" width="120" height="120"></canvas>
-              <div class="ring-label"><span class="ring-val" id="ring-acc-val">–</span><span class="ring-name">Accuracy</span></div>
-            </div>
-          </div>
-          <div class="metric-ring-wrap">
-            <div class="metric-ring" id="ring-precision">
-              <canvas id="ringPrecCanvas" width="120" height="120"></canvas>
-              <div class="ring-label"><span class="ring-val" id="ring-prec-val">–</span><span class="ring-name">Precision</span></div>
-            </div>
-          </div>
-          <div class="metric-ring-wrap">
-            <div class="metric-ring" id="ring-recall">
-              <canvas id="ringRecCanvas" width="120" height="120"></canvas>
-              <div class="ring-label"><span class="ring-val" id="ring-rec-val">–</span><span class="ring-name">Recall</span></div>
-            </div>
-          </div>
-          <div class="metric-ring-wrap">
-            <div class="metric-ring" id="ring-f1">
-              <canvas id="ringF1Canvas" width="120" height="120"></canvas>
-              <div class="ring-label"><span class="ring-val" id="ring-f1-val">–</span><span class="ring-name">F1 Score</span></div>
-            </div>
-          </div>
+          <div class="metric-ring-wrap"><div class="metric-ring"><canvas id="ringAucCanvas" width="120" height="120"></canvas><div class="ring-label"><span class="ring-val" id="ring-auc-val">–</span><span class="ring-name">ROC-AUC</span></div></div></div>
+          <div class="metric-ring-wrap"><div class="metric-ring"><canvas id="ringPrCanvas" width="120" height="120"></canvas><div class="ring-label"><span class="ring-val" id="ring-pr-val">–</span><span class="ring-name">PR-AUC</span></div></div></div>
+          <div class="metric-ring-wrap"><div class="metric-ring"><canvas id="ringPrecCanvas" width="120" height="120"></canvas><div class="ring-label"><span class="ring-val" id="ring-prec-val">–</span><span class="ring-name">Precision</span></div></div></div>
+          <div class="metric-ring-wrap"><div class="metric-ring"><canvas id="ringRecCanvas" width="120" height="120"></canvas><div class="ring-label"><span class="ring-val" id="ring-rec-val">–</span><span class="ring-name">Recall</span></div></div></div>
         </div>
+        <p class="op-note" id="op-note"></p>
         <div class="confusion-matrix-wrap">
-          <h4 class="cm-title">Confusion Matrix</h4>
+          <h4 class="cm-title">Confusion matrix <span id="cm-threshold" class="cm-thr"></span></h4>
           <div class="confusion-matrix" id="confusion-matrix">
-            <div class="cm-cell cm-header"></div>
-            <div class="cm-cell cm-header">Pred: No Churn</div>
-            <div class="cm-cell cm-header">Pred: Churn</div>
-            <div class="cm-cell cm-header">Actual: No Churn</div>
-            <div class="cm-cell tn" id="cm-tn">–</div>
-            <div class="cm-cell fp" id="cm-fp">–</div>
-            <div class="cm-cell cm-header">Actual: Churn</div>
-            <div class="cm-cell fn" id="cm-fn">–</div>
-            <div class="cm-cell tp" id="cm-tp">–</div>
+            <div class="cm-cell cm-header"></div><div class="cm-cell cm-header">Pred: stays</div><div class="cm-cell cm-header">Pred: churns</div>
+            <div class="cm-cell cm-header">Actual: stays</div><div class="cm-cell tn" id="cm-tn">–</div><div class="cm-cell fp" id="cm-fp">–</div>
+            <div class="cm-cell cm-header">Actual: churns</div><div class="cm-cell fn" id="cm-fn">–</div><div class="cm-cell tp" id="cm-tp">–</div>
           </div>
         </div>
+        <h4 class="cm-title">Precision &amp; recall if you contact the top…</h4>
+        <div class="table-wrapper"><table class="customer-table compact"><thead><tr><th>Top</th><th>Customers</th><th>Precision</th><th>Recall</th></tr></thead><tbody id="pak-body"></tbody></table></div>
+        <h4 class="cm-title">Model comparison (3-fold CV, training data)</h4>
+        <div class="table-wrapper"><table class="customer-table compact"><thead><tr><th>Model</th><th>CV PR-AUC</th><th></th></tr></thead><tbody id="compare-body"></tbody></table></div>
+        <div class="model-warnings" id="model-warnings"></div>
       </div>
     </div>
   </section>
@@ -393,15 +459,27 @@
     <div class="customers-toolbar">
       <div class="search-box">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" id="customer-search" placeholder="Search customer ID…" aria-label="Search customer" />
+        <input type="text" id="customer-search" placeholder="Search ID, segment, driver…" aria-label="Search customers" />
       </div>
       <div class="risk-filters" id="risk-filters">
-        <button class="risk-filter active" data-risk="All">All</button>
-        <button class="risk-filter high" data-risk="High">High Risk</button>
-        <button class="risk-filter medium" data-risk="Medium">Medium</button>
-        <button class="risk-filter low" data-risk="Low">Low Risk</button>
+        <button class="risk-filter active" data-risk="All" type="button">All</button>
+        <button class="risk-filter high" data-risk="High" type="button">High risk</button>
+        <button class="risk-filter medium" data-risk="Medium" type="button">Medium</button>
+        <button class="risk-filter low" data-risk="Low" type="button">Low risk</button>
       </div>
-      <div class="customer-count" id="customer-count">Showing 0 customers</div>
+      <div class="customer-count" id="customer-count" aria-live="polite">Showing 0 customers</div>
+      <label class="page-size" for="page-size">Rows
+        <select id="page-size" aria-label="Rows per page"><option>10</option><option selected>20</option><option>50</option><option>100</option></select>
+      </label>
+      <button class="btn-secondary btn-toolbar" id="export-customers-btn" type="button" data-min-role="analyst">Export CSV</button>
+    </div>
+
+    <div class="bulk-bar" id="bulk-bar" hidden>
+      <span id="bulk-count">0 selected</span>
+      <div class="bulk-actions">
+        <button class="btn-secondary btn-small" id="bulk-export" type="button" data-min-role="analyst">Export selected</button>
+        <button class="btn-secondary btn-small" id="bulk-clear" type="button">Clear</button>
+      </div>
     </div>
 
     <div class="card table-card">
@@ -409,18 +487,20 @@
         <table class="customer-table" id="customer-table">
           <thead>
             <tr>
-              <th>Customer ID</th>
-              <th>Risk Level</th>
-              <th>Churn Probability</th>
-              <th>Tenure (mo)</th>
-              <th>Monthly Charges</th>
-              <th>Support Tickets</th>
-              <th>Last Login (days)</th>
-              <th>Actual Churn</th>
+              <th class="col-select"><input type="checkbox" id="select-all" aria-label="Select all customers on this page" /></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="id" type="button">Customer</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="prob" type="button">Risk</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="prob" type="button">Churn probability</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="loss" type="button">Expected loss</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="revenue" type="button" id="th-revenue">Revenue / mo</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="tenure" type="button">Tenure</button></th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="driver" type="button">Top driver</button></th>
+              <th>Δ vs last run</th>
+              <th aria-sort="none"><button class="sort-btn" data-sort="actual" type="button">Actual</button></th>
             </tr>
           </thead>
           <tbody id="customer-tbody">
-            <tr><td colspan="8" class="empty-row">No data loaded. Please train a model first.</td></tr>
+            <tr><td colspan="10" class="empty-row">No data loaded. Please train a model first.</td></tr>
           </tbody>
         </table>
       </div>
@@ -428,210 +508,359 @@
     </div>
   </section>
 
-  <!-- ── SECTION: PREDICT SINGLE ── -->
+  <!-- ── SECTION: PREDICT ── -->
   <section class="section" id="section-predict">
     <div class="predict-grid">
       <div class="card predict-form-card">
         <h3 class="card-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          Customer Data Input
+          Customer data input
         </h3>
         <form id="predict-form" class="predict-form">
-          <div class="form-row">
-            <div class="form-group">
-              <label>Age</label>
-              <input type="number" id="p-age" value="35" min="18" max="80" />
-            </div>
-            <div class="form-group">
-              <label>Gender</label>
-              <select id="p-gender">
-                <option>Male</option><option>Female</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Tenure (months)</label>
-              <input type="number" id="p-tenure" value="12" min="0" />
-            </div>
-            <div class="form-group">
-              <label>Monthly Charges ($)</label>
-              <input type="number" id="p-monthly" value="65" step="0.01" />
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Total Charges ($)</label>
-              <input type="number" id="p-total" value="780" step="0.01" />
-            </div>
-            <div class="form-group">
-              <label>Num Products</label>
-              <input type="number" id="p-products" value="1" min="1" max="10" />
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Logins Last 30 Days</label>
-              <input type="number" id="p-logins" value="10" min="0" />
-            </div>
-            <div class="form-group">
-              <label>Support Tickets</label>
-              <input type="number" id="p-tickets" value="2" min="0" />
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Days Since Last Login</label>
-              <input type="number" id="p-lastlogin" value="5" min="0" />
-            </div>
-            <div class="form-group">
-              <label>Location</label>
-              <input type="text" id="p-location" value="New York" />
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label>Contract Type</label>
-              <select id="p-contract">
-                <option>Month-to-month</option>
-                <option>One year</option>
-                <option>Two year</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label>Payment Method</label>
-              <select id="p-payment">
-                <option>Credit card</option>
-                <option>Electronic check</option>
-                <option>Mailed check</option>
-                <option>Bank transfer</option>
-              </select>
-            </div>
-          </div>
+          <p class="card-subtitle" id="predict-empty">Train a model first. The form is built from the columns your model learned.</p>
+          <div class="predict-fields" id="predict-fields"></div>
           <button type="submit" class="btn-primary btn-full" id="predict-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-            Predict Churn
+            Predict churn
           </button>
         </form>
       </div>
 
       <div class="card predict-result-card" id="predict-result-card">
-        <h3 class="card-title">Prediction Result</h3>
+        <h3 class="card-title">Prediction result</h3>
         <div class="result-placeholder" id="result-placeholder">
-          <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="url(#rp1)" opacity="0.12"/><path d="M22 32 L28 38 L42 24" stroke="url(#rp2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><defs><linearGradient id="rp1" x1="4" y1="4" x2="60" y2="60"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient><linearGradient id="rp2" x1="4" y1="4" x2="60" y2="60"><stop stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient></defs></svg>
-          <p>Fill in the form and click Predict to see the churn probability and risk level.</p>
+          <svg viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="28" fill="url(#rp1)" opacity="0.12"/><path d="M22 32 L28 38 L42 24" stroke="url(#rp2)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><defs><linearGradient id="rp1" x1="4" y1="4" x2="60" y2="60"><stop stop-color="#147A7A"/><stop offset="1" stop-color="#0B3D4A"/></linearGradient><linearGradient id="rp2" x1="4" y1="4" x2="60" y2="60"><stop stop-color="#147A7A"/><stop offset="1" stop-color="#E8A838"/></linearGradient></defs></svg>
+          <p>Fill in the form and click Predict to see the churn probability, risk tier and what is driving it.</p>
         </div>
 
         <div class="result-content" id="result-content" style="display:none">
           <div class="prob-gauge-wrap">
             <div class="prob-gauge" id="prob-gauge">
               <canvas id="gaugeCanvas" width="220" height="130"></canvas>
-              <div class="gauge-overlay">
-                <span class="gauge-val" id="gauge-val">0%</span>
-                <span class="gauge-sub">Churn Probability</span>
-              </div>
+              <div class="gauge-overlay"><span class="gauge-val" id="gauge-val">0%</span><span class="gauge-sub">Churn probability</span></div>
             </div>
           </div>
-
-          <div class="risk-badge-large" id="risk-badge-large">
-            <span id="risk-label-large">–</span>
-          </div>
+          <div class="risk-badge-large" id="risk-badge-large"><span id="risk-label-large">–</span></div>
+          <p class="result-economics" id="result-economics"></p>
 
           <div class="recommendations" id="recommendations">
-            <h4>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 00-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0020 4.77 5.07 5.07 0 0019.91 1S18.73.65 16 2.48a13.38 13.38 0 00-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 005 4.77a5.44 5.44 0 00-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 009 18.13V22"/></svg>
-              CSM Recommendations
-            </h4>
+            <h4>CSM recommendations</h4>
             <ul id="recs-list"></ul>
+          </div>
+
+          <div class="whatif" id="whatif" aria-labelledby="whatif-title">
+            <div class="whatif-head">
+              <h4 id="whatif-title">What-if simulator</h4>
+              <span class="whatif-delta" id="whatif-delta" aria-live="polite"></span>
+              <button class="btn-secondary btn-small" id="whatif-reset" type="button">Reset</button>
+            </div>
+            <p class="whatif-hint">Drag a lever to see how the model's score changes. This shows what the model associates with each factor, not a guaranteed result of acting on it.</p>
+            <p class="whatif-note" id="whatif-note" role="status" hidden></p>
+            <div class="whatif-levers" id="whatif-levers"></div>
+            <div class="whatif-contract" id="whatif-contract" role="radiogroup" aria-label="Category"></div>
+            <h5 class="impact-title">What is driving this score</h5>
+            <div class="impact-list" id="impact-list"></div>
           </div>
         </div>
       </div>
     </div>
   </section>
 
+  <!-- ── SECTION: ADMIN ── -->
+  <section class="section" id="section-admin">
+    <div class="admin-grid">
+      <div class="card admin-card">
+        <div class="card-title-row"><h3>Workspace</h3><span class="badge admin-badge" id="workspace-badge">Admin</span></div>
+        <p class="admin-intro">Model lifecycle, business economics and monitoring for this workspace.</p>
+        <div class="admin-stats">
+          <div><span id="admin-user-count">—</span><p>Users</p></div>
+          <div><span id="admin-customer-count">—</span><p>Customers</p></div>
+          <div><span id="admin-model-status">—</span><p>Champion model</p></div>
+        </div>
+        <div class="admin-actions">
+          <button class="btn-secondary btn-full" id="admin-refresh-btn" type="button">Refresh data</button>
+          <button class="btn-secondary btn-full" id="admin-score-btn" type="button" data-min-role="admin">Score a new batch (CSV)…</button>
+          <input type="file" id="score-file" accept=".csv" hidden />
+          <button class="btn-secondary btn-full" id="admin-load-sample-btn" type="button" data-min-role="admin">Load demo workspace</button>
+          <button class="btn-primary btn-full danger" id="admin-reset-model-btn" type="button" data-min-role="owner">Reset workspace</button>
+        </div>
+      </div>
+
+      <div class="card admin-card">
+        <h3>Economics &amp; thresholds</h3>
+        <p class="admin-intro">Tiers and the "worth contacting" rule come from the cost of an outreach and the value of a saved customer.</p>
+        <form id="admin-settings-form" class="admin-settings-form" onsubmit="return false">
+          <div class="form-row">
+            <div class="form-group"><label for="set-cost">Outreach cost ($)</label><input type="number" min="0" step="1" id="set-cost" /></div>
+            <div class="form-group"><label for="set-save">Save rate (0–1)</label><input type="number" min="0.01" max="1" step="0.01" id="set-save" /></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label for="set-months">Value horizon (months)</label><input type="number" min="1" max="120" step="1" id="set-months" /></div>
+            <div class="form-group"><label for="set-mode">Tier thresholds</label>
+              <select id="set-mode"><option value="auto">Automatic (from economics)</option><option value="manual">Manual</option></select></div>
+          </div>
+          <div class="form-row" id="manual-thresholds">
+            <div class="form-group"><label for="set-high">High-risk ≥</label><input type="number" min="0.01" max="1" step="0.01" id="set-high" /></div>
+            <div class="form-group"><label for="set-medium">Medium-risk ≥</label><input type="number" min="0.01" max="1" step="0.01" id="set-medium" /></div>
+          </div>
+          <p class="threshold-note" id="threshold-note"></p>
+          <div class="form-group checkbox-group"><label><input type="checkbox" id="set-alert-high" /> Alert on high-risk accounts</label></div>
+          <div class="form-group checkbox-group"><label><input type="checkbox" id="set-alert-jump" /> Alert when risk jumps</label>
+            <input type="number" min="0.05" max="0.9" step="0.05" id="set-jump" class="inline-num" aria-label="Risk jump size" /></div>
+          <button class="btn-primary btn-full" id="admin-save-settings-btn" type="button" data-min-role="admin">Save &amp; re-score tiers</button>
+        </form>
+      </div>
+
+      <div class="card table-card admin-card admin-wide" id="team-card" data-min-role="admin">
+        <div class="table-card-header">
+          <div><h3>Team &amp; access</h3><p id="team-sub">Loading…</p></div>
+          <form id="invite-form" class="invite-form">
+            <input type="email" id="invite-email" placeholder="colleague@company.com" required aria-label="Invite by email" />
+            <select id="invite-role" aria-label="Role"></select>
+            <button class="btn-primary btn-small" type="submit">Invite</button>
+          </form>
+        </div>
+        <div id="invite-result" class="invite-result" hidden></div>
+        <div class="table-wrapper"><table class="customer-table"><thead><tr><th>Member</th><th>Role</th><th>Since</th><th></th></tr></thead>
+          <tbody id="members-body"></tbody></table></div>
+        <div id="pending-invites" class="pending-invites" hidden></div>
+        <div class="sso-row" data-min-role="owner"><label><input type="checkbox" id="sso-required" /> Require single sign-on (SAML / OIDC) for this workspace. Password logins are refused.</label></div>
+      </div>
+
+      <div class="card admin-card admin-wide" id="usage-card" data-min-role="admin">
+        <div class="table-card-header"><div><h3>Plan &amp; usage</h3><p id="usage-sub">Loading…</p></div>
+          <button class="btn-secondary btn-small" id="usage-export" type="button">Export usage (CSV)</button></div>
+        <div id="usage-meters" class="usage-meters"></div>
+      </div>
+
+      <div class="card admin-card admin-wide" id="pipeline-card" data-min-role="admin">
+        <div class="table-card-header"><div><h3>Data pipeline · B2B accounts</h3><p id="pipeline-sub">Loading…</p></div>
+          <button class="btn-primary btn-small" id="pipeline-run" type="button" disabled>Train from tables</button></div>
+        <div class="pipe-grid">
+          <section><h4>1 · Tables</h4>
+            <div id="pipe-tables"></div>
+            <form id="pipe-upload-form" class="pipe-form">
+              <select id="pipe-role" aria-label="Table"><option value="accounts">accounts</option><option value="events">events</option><option value="tickets">tickets</option><option value="invoices">invoices</option></select>
+              <input type="file" id="pipe-file" accept=".csv,text/csv" aria-label="CSV file" />
+              <select id="pipe-mode" aria-label="Mode"><option value="append">add rows</option><option value="replace">replace table</option></select>
+              <input id="pipe-mapping" placeholder='optional column mapping {"account_id":"CustomerRef"}' aria-label="Column mapping" />
+              <button class="btn-secondary btn-small" type="submit">Upload</button>
+            </form><div id="pipe-map"></div><small class="muted" id="pipe-role-help"></small></section>
+          <section><h4>2 · What does “churned” mean?</h4>
+            <div class="pipe-form">
+              <select id="pipe-type" aria-label="Definition"><option value="churn_date">Account has a churn date</option><option value="inactivity">No product activity</option></select>
+              <label class="inline-label">within <input type="number" id="pipe-horizon" value="90" min="14" max="365" aria-label="Horizon in days" /> days</label>
+              <button class="btn-secondary btn-small" id="pipe-preview-btn" type="button">Preview</button>
+              <button class="btn-primary btn-small" id="pipe-save-btn" type="button">Save</button>
+            </div><div id="pipe-preview"></div></section>
+          <section><h4>3 · Scheduled scoring</h4>
+            <div class="pipe-form"><label class="inline-label"><input type="checkbox" id="pipe-sched-on" /> score automatically every <input type="number" id="pipe-sched-hours" value="24" min="1" max="744" aria-label="Hours between runs" /> hours</label>
+              <button class="btn-secondary btn-small" id="pipe-sched-save" type="button">Save</button></div>
+            <small class="muted" id="pipe-sched-status"></small></section>
+          <section><h4>4 · Alert channels</h4>
+            <div id="chan-list"></div>
+            <form id="chan-form" class="pipe-form">
+              <select id="chan-kind" aria-label="Kind"><option value="slack">Slack webhook</option><option value="webhook">Signed webhook</option><option value="email">Email</option></select>
+              <input id="chan-name" placeholder="name" aria-label="Name" />
+              <input id="chan-target" placeholder="https://hooks.slack.com/… or a@b.com, c@d.com" required aria-label="Destination" />
+              <select id="chan-sev" aria-label="Minimum severity"><option value="High">High only</option><option value="Medium">Medium and High</option></select>
+              <label class="inline-label"><input type="checkbox" id="chan-accounts" /> include account names and amounts</label>
+              <button class="btn-secondary btn-small" type="submit">Add channel</button>
+            </form></section>
+          <section><h4>5 · Push data with an API key</h4>
+            <div id="key-list"></div>
+            <form id="key-form" class="pipe-form"><input id="key-name" placeholder="key name, e.g. event pipeline" required aria-label="Key name" /><button class="btn-secondary btn-small" type="submit">Create key</button></form>
+            <div id="key-result" class="invite-result" hidden></div></section>
+          <section><h4>6 · Pull from a URL</h4>
+            <div id="src-list"></div>
+            <form id="src-form" class="pipe-form">
+              <input id="src-name" placeholder="name" aria-label="Name" />
+              <select id="src-role" aria-label="Table"><option value="accounts">accounts</option><option value="events">events</option><option value="tickets">tickets</option><option value="invoices">invoices</option></select>
+              <input id="src-url" placeholder="https://api.vendor.com/v1/records" required aria-label="URL" />
+              <input id="src-auth" placeholder="Authorization header value (kept encrypted)" autocomplete="off" aria-label="Authorization header" />
+              <select id="src-format" aria-label="Format"><option value="json">JSON</option><option value="csv">CSV</option></select>
+              <input id="src-records" placeholder="records path, e.g. data.items" aria-label="Records path" />
+              <input id="src-next" placeholder="next-page path, e.g. meta.next" aria-label="Next page path" />
+              <input id="src-since" placeholder="since parameter, e.g. updated_after" aria-label="Since parameter" />
+              <button class="btn-secondary btn-small" type="submit">Add source</button>
+            </form></section>
+        </div>
+      </div>
+
+      <div class="card admin-card admin-wide" id="mlops-card" data-min-role="admin">
+        <div class="table-card-header"><div><h3>Model operations <span id="mlops-health" class="risk-tag">…</span></h3>
+          <p>Every scoring run is logged. When its outcome is known, the model is graded on what really happened.</p></div>
+          <div class="pipe-form"><button class="btn-secondary btn-small" id="mlops-check" type="button">Check now</button>
+            <button class="btn-secondary btn-small" id="mlops-retrain" type="button">Train a challenger</button>
+            <button class="btn-secondary btn-small" id="mlops-rollback" type="button" disabled>Roll back</button></div></div>
+        <div class="pipe-grid">
+          <section><h4>Realized performance</h4><div id="mlops-health-text"></div>
+            <div class="table-wrapper"><table class="customer-table"><thead><tr><th>Run</th><th>As of</th><th>Accounts</th><th>Outcome</th><th>ROC / PR-AUC</th><th>Churned</th><th></th></tr></thead>
+              <tbody id="mlops-runs"></tbody></table></div></section>
+          <section><h4>Challenger in shadow</h4><div id="mlops-shadow"></div>
+            <h4 style="margin-top:18px">Backtest <button class="btn-secondary btn-small" id="mlops-backtest-btn" type="button">Run</button></h4><div id="mlops-backtest"></div></section>
+          <section><h4>Retraining policy</h4>
+            <p class="muted" id="mlops-auto-note" hidden>Automatic retraining needs the data pipeline (tables and a churn definition). Uploads can still be graded with outcomes.</p>
+            <div class="pipe-form" style="flex-direction:column;align-items:flex-start">
+              <label class="inline-label"><input type="checkbox" id="pol-enabled" /> check automatically every few hours</label>
+              <label class="inline-label"><input type="checkbox" id="pol-on_drift" /> train a challenger when input data shifts a lot</label>
+              <label class="inline-label"><input type="checkbox" id="pol-on_degradation" /> train a challenger when realized performance degrades</label>
+              <label class="inline-label">and at least every <input type="number" id="pol-every_days" min="0" max="365" /> days (0 = never)</label>
+              <label class="inline-label">or after <input type="number" id="pol-min_new_positives" min="0" /> new churn events (0 = off)</label>
+              <label class="inline-label">promote after <input type="number" id="pol-shadow_min_runs" min="1" max="12" /> matched runs, needing <input type="number" id="pol-margin_pr_auc" min="0" step="0.5" /> PR-AUC points more</label>
+              <label class="inline-label"><input type="checkbox" id="pol-auto_promote" /> promote automatically when it wins (otherwise you are asked)</label>
+              <button class="btn-primary btn-small" id="mlops-policy-save" type="button">Save policy</button></div></section>
+        </div>
+      </div>
+
+      <div class="card table-card admin-card admin-wide">
+        <div class="table-card-header"><div><h3>Model registry</h3><p>Every training run is versioned. Promote any version to make it live.</p></div></div>
+        <div class="table-wrapper"><table class="customer-table"><thead><tr>
+          <th>Version</th><th>Status</th><th>Algorithm</th><th>PR-AUC</th><th>ROC-AUC</th><th>Rows</th><th>Trained</th><th></th></tr></thead>
+          <tbody id="registry-body"><tr><td class="empty-row" colspan="8">No models yet.</td></tr></tbody></table></div>
+      </div>
+
+      <div class="card admin-card" id="privacy-card" data-min-role="admin">
+        <h3>Privacy &amp; data</h3>
+        <div class="form-group checkbox-group"><label><input type="checkbox" id="hash-ids" /> Pseudonymise customer IDs on new uploads (HMAC, irreversible, per workspace)</label></div>
+        <form id="erase-form" class="privacy-form">
+          <label for="erase-ids">Erase customers on request</label>
+          <textarea id="erase-ids" rows="2" placeholder="Customer IDs, separated by commas or spaces"></textarea>
+          <button class="btn-secondary btn-small" type="submit">Erase from live data and snapshots</button>
+        </form>
+        <form id="dsar-form" class="privacy-form">
+          <label for="dsar-id">Export everything stored about one customer</label>
+          <div class="inline-row"><input type="text" id="dsar-id" placeholder="Customer ID" /><button class="btn-secondary btn-small" type="submit">Download JSON</button></div>
+        </form>
+        <div class="danger-zone" data-min-role="owner">
+          <h4>Danger zone</h4>
+          <p>Deleting the workspace removes all data and destroys its encryption key. This cannot be undone.</p>
+          <button class="btn-danger btn-small" id="delete-workspace" type="button">Delete this workspace…</button>
+        </div>
+      </div>
+
+      <div class="card admin-card">
+        <h3>Drift monitoring</h3>
+        <p class="admin-intro">Score a fresh batch to compare it with the training data. PSI under 0.1 is stable; over 0.25 is a major shift.</p>
+        <div id="drift-panel"><div class="empty-card">No batch scored yet.</div></div>
+      </div>
+
+      <div class="card admin-card" id="audit-card" data-min-role="admin">
+        <div class="card-title-row"><h3>Audit log</h3><span class="risk-tag" id="chain-badge">…</span></div>
+        <p class="admin-intro">Append-only and hash-chained: any edit or deletion is detected.</p>
+        <button class="btn-secondary btn-small" id="audit-export" type="button">Export log</button>
+        <ul class="audit-list" id="audit-list"><li class="empty-card">No activity yet.</li></ul>
+      </div>
+
+      <div class="card table-card admin-card admin-wide" id="users-card" hidden>
+        <div class="table-card-header">
+          <div><h3>User management</h3><p>View and manage registered users in Firebase Auth.</p></div>
+          <div><input id="admin-user-search" class="input-search" type="search" placeholder="Search users" aria-label="Search users" /></div>
+        </div>
+        <div class="table-wrapper"><table class="customer-table" id="admin-user-table"><thead><tr>
+          <th>Name</th><th>Email</th><th>Providers</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="admin-user-list"><tr><td class="empty-row" colspan="5">Loading users…</td></tr></tbody></table></div>
+      </div>
+    </div>
+  </section>
+
 </main>
 
-<!-- Customer Detail Drawer -->
-<div class="drawer-overlay" id="customer-drawer" style="display:none" role="dialog" aria-modal="true" aria-labelledby="drawer-customer-id">
+<!-- Customer detail drawer -->
+<div class="drawer-overlay" id="customer-drawer" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="drawer-customer-id">
   <div class="drawer-panel">
-    <button class="drawer-close" id="drawer-close" aria-label="Close customer details">×</button>
+    <button class="drawer-close" id="drawer-close" aria-label="Close customer details" type="button">×</button>
     <div class="drawer-header">
-      <div>
-        <h3 id="drawer-customer-id">Customer</h3>
-        <span class="risk-tag" id="drawer-risk-tag">Risk</span>
-      </div>
+      <div><h3 id="drawer-customer-id">Customer</h3><span class="risk-tag" id="drawer-risk-tag">Risk</span></div>
       <div class="drawer-actions">
-        <button class="btn-secondary" id="drawer-train-btn">Retrain Model</button>
+        <button class="btn-primary btn-small" id="drawer-sim-btn" type="button">Simulate what-if</button>
       </div>
     </div>
     <div class="drawer-content" id="drawer-content">
-      <div class="drawer-row"><span>Churn Probability</span><strong id="drawer-churn-prob">–</strong></div>
+      <div class="drawer-row"><span>Churn probability</span><strong id="drawer-churn-prob">–</strong></div>
+      <div class="drawer-prob" aria-hidden="true"><span class="drawer-prob-fill" id="drawer-prob-fill"></span></div>
+      <div class="drawer-row"><span>Expected loss</span><strong id="drawer-loss">–</strong></div>
+      <div class="drawer-row"><span>Revenue / month</span><strong id="drawer-revenue">–</strong></div>
       <div class="drawer-row"><span>Tenure</span><strong id="drawer-tenure">–</strong></div>
-      <div class="drawer-row"><span>Monthly Charges</span><strong id="drawer-monthly">–</strong></div>
-      <div class="drawer-row"><span>Support Tickets</span><strong id="drawer-support">–</strong></div>
-      <div class="drawer-row"><span>Last Login</span><strong id="drawer-last-login">–</strong></div>
-      <div class="drawer-row"><span>Contract Type</span><strong id="drawer-contract">–</strong></div>
-      <div class="drawer-row"><span>Payment Method</span><strong id="drawer-payment">–</strong></div>
-      <div class="drawer-row drawer-note"><span>Recommended action</span><p id="drawer-action">Train the model to get recommendations.</p></div>
+      <div class="drawer-block"><h4>Why this score</h4><div class="impact-list" id="drawer-reasons"></div></div>
+      <div class="drawer-block"><h4>Recommended actions</h4><ul class="drawer-recs" id="drawer-recs"></ul></div>
+      <div class="drawer-block">
+        <h4>Activity</h4>
+        <ul class="activity-list" id="drawer-activity"></ul>
+        <form class="log-form" id="log-form" data-min-role="analyst">
+          <select id="log-kind" aria-label="Action type"><option value="call">Call</option><option value="email">Email</option><option value="discount">Discount offer</option><option value="meeting">Meeting</option><option value="other">Other</option></select>
+          <input type="text" id="log-notes" placeholder="What did you do?" maxlength="300" aria-label="Notes" />
+          <button class="btn-secondary btn-small" type="submit">Log action</button>
+        </form>
+      </div>
+      <div class="drawer-block"><details class="attrs"><summary>All attributes</summary><dl class="snapshot" id="drawer-attrs"></dl></details></div>
     </div>
   </div>
 </div>
 
-<!-- Loading Overlay -->
-<div class="loading-overlay" id="loading-overlay" style="display:none">
-  <div class="loading-spinner">
-    <div class="spinner-ring"></div>
-    <div class="spinner-ring"></div>
-    <div class="spinner-ring"></div>
-  </div>
-  <p class="loading-text" id="loading-text">Training model…</p>
+<!-- Loading Overlay (short blocking operations such as promoting a model) -->
+<div class="loading-overlay" id="loading-overlay" aria-hidden="true" role="alert" aria-live="assertive">
+  <div class="loading-spinner"><div class="spinner-ring"></div><div class="spinner-ring"></div><div class="spinner-ring"></div></div>
+  <p class="loading-text" id="loading-text">Working…</p>
 </div>
-
 <!-- ═══════════════════════════  FIREBASE AUTH OVERLAY  ═══════════════════════════ -->
-<div id="auth-overlay" style="display: none;">
+<div id="auth-overlay" class="auth-overlay is-visible" aria-hidden="false">
+  <div class="auth-splash" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="9" fill="#0B3D4A"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#F2E8D5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="24" cy="10" r="2.4" fill="#E8A838"/></svg>
+    <span class="auth-splash-bar"></span>
+  </div>
+  <div class="auth-sparkles" aria-hidden="true">
+    <span></span><span></span><span></span><span></span><span></span><span></span>
+  </div>
+
   <div class="auth-card">
     <div class="auth-header">
-      <div class="logo-icon">
-        <svg viewBox="0 0 32 32" fill="none"><circle cx="16" cy="16" r="14" fill="url(#lg1)"/><path d="M8 20 L13 13 L18 17 L24 10" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linecap="round"/><circle cx="24" cy="10" r="2.5" fill="#fff"/><defs><linearGradient id="lg1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs></svg>
+      <div class="auth-brand" aria-hidden="true">
+        <div class="auth-brand-mark">
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <rect width="32" height="32" rx="9" fill="#0B3D4A"/>
+            <path class="auth-brand-path" d="M8 20 L13 13 L18 17 L24 10" stroke="#F2E8D5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle class="auth-brand-dot" cx="24" cy="10" r="2.4" fill="#E8A838"/>
+          </svg>
+        </div>
+        <span class="auth-brand-name">ChurnSight</span>
       </div>
-      <h2>Welcome to ChurnSight</h2>
-      <p id="auth-subtitle">Sign in to access your Churn Prediction Dashboard</p>
+      <h2 class="auth-title">Welcome back</h2>
+      <p id="auth-subtitle" class="auth-subtitle">Sign in to access your churn prediction workspace</p>
     </div>
 
-    <!-- Tab Selection -->
     <div class="auth-tabs">
-      <button class="auth-tab active" id="tab-login">Sign In</button>
-      <button class="auth-tab" id="tab-register">Register</button>
+      <button class="auth-tab active" id="tab-login" type="button">Sign In</button>
+      <button class="auth-tab" id="tab-register" type="button">Register</button>
     </div>
 
-    <!-- Email & Password Form -->
     <form id="auth-form" class="auth-form">
-      <div class="form-group">
+      <div class="form-group auth-field" style="--i:0">
         <label for="auth-email">Email Address</label>
         <div class="input-with-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <input type="email" id="auth-email" placeholder="name@company.com" required />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <input type="email" id="auth-email" placeholder="name@company.com" required autocomplete="email" />
         </div>
       </div>
-      <div class="form-group">
+      <div class="form-group auth-field" style="--i:1">
         <label for="auth-password">Password</label>
         <div class="input-with-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-          <input type="password" id="auth-password" placeholder="••••••••" required />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+          <input type="password" id="auth-password" placeholder="••••••••" required autocomplete="current-password" />
         </div>
       </div>
-      <button type="submit" class="btn-primary btn-full" id="auth-submit-btn">
+      <button type="submit" class="btn-primary btn-full auth-field" id="auth-submit-btn" style="--i:2">
         <span id="submit-btn-text">Sign In</span>
       </button>
+      <div id="forgot-password-row" class="forgot-password-row">
+        <button type="button" id="forgot-password-btn" class="forgot-password-link">Forgot your password?</button>
+      </div>
     </form>
 
-    <div class="auth-divider">
-      <span>or continue with</span>
-    </div>
+    <div class="auth-divider auth-field" style="--i:3"><span>or continue with</span></div>
 
-    <!-- Google Login Button -->
-    <button class="btn-google btn-full" id="google-login-btn">
-      <svg class="google-icon" viewBox="0 0 24 24">
+    <button class="btn-google btn-full auth-field" id="google-login-btn" type="button" style="--i:4">
+      <svg class="google-icon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
         <path fill="#EA4335" d="M12 5.04c1.66 0 3.2.57 4.38 1.69l3.27-3.27C17.67 1.54 15.01 0 12 0 7.35 0 3.37 2.67 1.44 6.56l3.86 3c.9-2.69 3.42-4.52 6.7-4.52z"/>
         <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.44h6.44c-.28 1.44-1.09 2.66-2.31 3.48l3.6 2.79c2.1-1.94 3.76-4.8 3.76-8.37z"/>
         <path fill="#FBBC05" d="M5.3 14.44A7.16 7.16 0 014.9 12c0-.85.15-1.67.4-2.44L1.44 6.56C.52 8.42 0 10.15 0 12s.52 3.58 1.44 5.44l3.86-3z"/>
@@ -642,88 +871,75 @@
   </div>
 </div>
 
-  <section class="section" id="section-admin">
-    <div class="admin-grid">
-      <div class="card admin-card">
-        <div class="card-title-row">
-          <h3>Admin Console</h3>
-          <span class="badge admin-badge">Admin only</span>
-        </div>
-        <p class="admin-intro">Manage users, model lifecycle, and churn system settings from one place.</p>
-        <div class="admin-stats">
-          <div>
-            <span id="admin-user-count">—</span>
-            <p>Active users</p>
-          </div>
-          <div>
-            <span id="admin-customer-count">—</span>
-            <p>Customer records</p>
-          </div>
-          <div>
-            <span id="admin-model-status">—</span>
-            <p>Model state</p>
-          </div>
-        </div>
-        <div class="admin-actions">
-          <button class="btn-secondary btn-full" id="admin-refresh-btn">Refresh data</button>
-          <button class="btn-primary btn-full" id="admin-reset-model-btn">Reset model session</button>
-          <button class="btn-secondary btn-full" id="admin-load-sample-btn">Load sample model</button>
-        </div>
-      </div>
 
-      <div class="card table-card admin-card">
-        <div class="table-card-header">
-          <div>
-            <h3>User Management</h3>
-            <p>View and manage registered users in Firebase Auth.</p>
-          </div>
-          <div>
-            <input id="admin-user-search" class="input-search" type="search" placeholder="Search users" aria-label="Search users" />
-          </div>
-        </div>
-        <div class="table-wrapper">
-          <table class="customer-table" id="admin-user-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Providers</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="admin-user-list">
-              <tr><td class="empty-row" colspan="5">Loading users…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+<!-- Shown when sign-in succeeded but access is not allowed yet (MFA, SSO, no workspace) -->
+<div id="access-gate" class="auth-overlay" hidden role="alertdialog" aria-labelledby="gate-title">
+  <div class="auth-card gate-card">
+    <h2 class="auth-title" id="gate-title">Access needed</h2>
+    <p class="auth-subtitle" id="gate-text"></p>
+    <form id="gate-invite" class="gate-invite" hidden>
+      <input type="text" id="gate-token" placeholder="Paste your invitation code" autocomplete="off" />
+      <button class="btn-primary btn-full" type="submit">Join workspace</button>
+    </form>
+    <button class="btn-secondary btn-full" id="gate-signout" type="button">Sign out</button>
+  </div>
+</div>
 
-      <div class="card admin-card">
-        <h3>Churn System Settings</h3>
-        <form id="admin-settings-form" class="admin-settings-form">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="admin-threshold-high">High risk threshold</label>
-              <input type="number" step="0.01" min="0" max="1" id="admin-threshold-high" />
-            </div>
-            <div class="form-group">
-              <label for="admin-threshold-medium">Medium risk threshold</label>
-              <input type="number" step="0.01" min="0" max="1" id="admin-threshold-medium" />
-            </div>
-          </div>
-          <div class="form-group checkbox-group">
-            <label><input type="checkbox" id="admin-alert-reengage" /> Enable re-engagement trigger</label>
-          </div>
-          <div class="form-group checkbox-group">
-            <label><input type="checkbox" id="admin-alert-support" /> Enable support escalation trigger</label>
-          </div>
-          <button class="btn-primary btn-full" id="admin-save-settings-btn" type="button">Save settings</button>
-        </form>
-      </div>
+<!-- Toast (body level so it shows on every section) -->
+<div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+
+<!-- Command palette -->
+<div class="palette-overlay" id="palette" aria-hidden="true">
+  <div class="palette-panel" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="palette-input-row">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input id="palette-input" type="text" placeholder="Jump to a page, run an action, or find a customer…" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" />
+      <kbd>Esc</kbd>
     </div>
-  </section>
+    <ul class="palette-list" id="palette-list" role="listbox"></ul>
+    <div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> select</span><span><kbd>?</kbd> shortcuts</span></div>
+  </div>
+</div>
+
+<div class="palette-overlay" id="shortcuts" aria-hidden="true">
+  <div class="palette-panel shortcuts-panel" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <h3 class="shortcuts-title">Keyboard shortcuts</h3>
+    <dl class="shortcuts-grid">
+      <dt><kbd>Ctrl</kbd><kbd>K</kbd></dt><dd>Command palette</dd>
+      <dt><kbd>/</kbd></dt><dd>Search customers</dd>
+      <dt><kbd>?</kbd></dt><dd>This help</dd>
+      <dt><kbd>g</kbd> then <kbd>u</kbd></dt><dd>Upload &amp; train</dd>
+      <dt><kbd>g</kbd> then <kbd>o</kbd></dt><dd>Overview</dd>
+      <dt><kbd>g</kbd> then <kbd>h</kbd></dt><dd>Health scores</dd>
+      <dt><kbd>g</kbd> then <kbd>c</kbd></dt><dd>Cohorts</dd>
+      <dt><kbd>g</kbd> then <kbd>a</kbd></dt><dd>Alerts</dd>
+      <dt><kbd>g</kbd> then <kbd>n</kbd></dt><dd>Analytics</dd>
+      <dt><kbd>g</kbd> then <kbd>t</kbd></dt><dd>Customers</dd>
+      <dt><kbd>g</kbd> then <kbd>p</kbd></dt><dd>Predict single</dd>
+      <dt><kbd>d</kbd></dt><dd>Toggle dark theme</dd>
+    </dl>
+  </div>
+</div>
 
 <script type="module" src="src/main.js"></script>
+<div class="capture-frame" id="capture-frame" aria-hidden="true" data-no-capture></div>
+<div class="bug-backdrop" id="bug-backdrop" hidden data-no-capture></div>
+<section class="bug-card" id="bug-card" role="dialog" aria-modal="true" aria-labelledby="bug-title" hidden data-no-capture>
+  <header class="bug-head"><h3 id="bug-title">Report a problem</h3>
+    <button class="icon-btn" id="bug-close" type="button" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+  <div id="bug-body">
+    <div class="bug-preview" id="bug-preview"></div>
+    <form id="bug-form">
+      <label class="bug-label" for="bug-msg">What went wrong, or what were you trying to do?</label>
+      <textarea id="bug-msg" rows="4" maxlength="4000" placeholder="For example: the chart on Overview is empty after I upload my file."></textarea>
+      <label class="check bug-include" id="bug-include-row"><input type="checkbox" id="bug-include" checked /><span>Attach this screenshot. It may show customer data that is visible on this page; it is stored encrypted and only your workspace admins can open it.</span></label>
+      <div class="bug-actions"><span class="bug-state" id="bug-state" role="status"></span>
+        <button class="btn-secondary btn-small" id="bug-cancel" type="button">Cancel</button>
+        <button class="btn-primary btn-small" id="bug-send" type="submit">Send report</button></div>
+    </form>
+  </div>
+  <div class="bug-done" id="bug-done" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 13l4 4L19 7"/></svg>
+    <p><strong>Thanks, we have it.</strong><br /><small>Reference <code id="bug-ref"></code></small></p></div>
+</section>
 </body>
 </html>

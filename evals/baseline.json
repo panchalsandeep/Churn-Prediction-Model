@@ -1,0 +1,112 @@
+{
+ "demo": {
+  "model": {
+   "roc_auc": 78.57,
+   "pr_auc": 38.61,
+   "brier": 0.0828,
+   "lift_top10": 3.85
+  },
+  "floor": {
+   "no_skill_pr_auc": 11.31,
+   "no_skill_roc_auc": 50.0,
+   "logistic_regression": {
+    "roc_auc": 79.29,
+    "pr_auc": 37.52,
+    "brier": 0.0851
+   }
+  },
+  "rows": 8000,
+  "recorded": {
+   "at": "2026-10-11T19:13:05Z",
+   "commit": "0f68673"
+  }
+ },
+ "b2b": {
+  "model": {
+   "roc_auc": 93.76,
+   "pr_auc": 67.25,
+   "brier": 0.072,
+   "lift_top10": 6.85
+  },
+  "floor": {
+   "no_skill_pr_auc": 6.89,
+   "no_skill_roc_auc": 50.0,
+   "logistic_regression": {
+    "roc_auc": 92.21,
+    "pr_auc": 71.21,
+    "brier": 0.0336
+   }
+  },
+  "rows": 4381,
+  "recorded": {
+   "at": "2026-10-11T19:13:05Z",
+   "commit": "0f68673"
+  }
+ },
+ "telco": {
+  "model": {
+   "roc_auc": 84.04,
+   "pr_auc": 65.63,
+   "brier": 0.1369,
+   "lift_top10": 2.85
+  },
+  "floor": {
+   "no_skill_pr_auc": 26.54,
+   "no_skill_roc_auc": 50.0,
+   "logistic_regression": {
+    "roc_auc": 84.39,
+    "pr_auc": 63.79,
+    "brier": 0.1377
+   }
+  },
+  "rows": 7043,
+  "recorded": {
+   "at": "2026-10-11T19:13:05Z",
+   "commit": "0f68673"
+  }
+ },
+ "bank": {
+  "model": {
+   "roc_auc": 86.31,
+   "pr_auc": 69.84,
+   "brier": 0.1035,
+   "lift_top10": 3.97
+  },
+  "floor": {
+   "no_skill_pr_auc": 20.37,
+   "no_skill_roc_auc": 50.0,
+   "logistic_regression": {
+    "roc_auc": 77.04,
+    "pr_auc": 47.59,
+    "brier": 0.1357
+   }
+  },
+  "rows": 10000,
+  "recorded": {
+   "at": "2026-10-11T19:13:05Z",
+   "commit": "0f68673"
+  }
+ },
+ "orange": {
+  "model": {
+   "roc_auc": 93.95,
+   "pr_auc": 90.91,
+   "brier": 0.0331,
+   "lift_top10": 6.67
+  },
+  "floor": {
+   "no_skill_pr_auc": 14.49,
+   "no_skill_roc_auc": 50.0,
+   "logistic_regression": {
+    "roc_auc": 81.75,
+    "pr_auc": 46.55,
+    "brier": 0.098
+   }
+  },
+  "rows": 3333,
+  "recorded": {
+   "at": "2026-10-11T19:13:05Z",
+   "commit": "0f68673"
+  }
+ }
+}

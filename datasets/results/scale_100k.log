@@ -1,0 +1,28 @@
+generating 100,000 rows…
+  done in 0.7s (65 MB in memory)
+
+training 100,000 rows: 79s total · status champion · ROC-AUC 80.99 · PR-AUC 44.28
+  Saving model and scores                  27.0s
+  Scoring customers (out-of-fold)          10.0s
+  Fitting final model                       9.6s
+  Measuring feature importance              6.9s
+  Calibrating probabilities                 6.6s
+  Evaluating on holdout                     5.8s
+  after training: train 51.58s, build scored frame 6.33s, write snapshot 3.21s, register model 0.18s, persist customers 12.71s, alerts 1.0s, segments 0.35s
+
+storage: database 84 MB · model artifacts + snapshot 10 MB
+peak memory (RSS): 540 MB
+
+query latency:
+    · summary() aggregates                        p50  3132.2 ms   max  3135.0 ms
+    · top-50 by expected loss                     p50     2.3 ms   max     3.4 ms
+    · registry.champion + meta                    p50     1.1 ms   max     1.3 ms
+  results payload (uncached)                      p50     6.6 ms   max     6.7 ms
+  results payload (cached)                        p50     0.3 ms   max     0.4 ms
+  customers page 1 (sort by risk)                 p50     1.5 ms   max     1.8 ms
+  customers page 500 (offset 10,000)              p50   146.5 ms   max   162.8 ms
+  customers tier=High by expected loss            p50     1.6 ms   max     3.6 ms
+  search by ID prefix                             p50     1.2 ms   max     4.7 ms
+  customer detail (explained on demand)           p50   125.6 ms   max   203.1 ms
+  predict (explain)                               p50   150.0 ms   max   152.4 ms
+  export of 20,001 rows (keyset streaming)                          698 ms

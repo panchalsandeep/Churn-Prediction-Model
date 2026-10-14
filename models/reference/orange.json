@@ -1,0 +1,54 @@
+{
+ "name": "churnsight-reference-orange",
+ "dataset": "Orange telecom churn dataset (public)",
+ "rows": 3333,
+ "target": "Churn",
+ "algorithm": "Gradient Boosting (tuned)",
+ "validation": "random",
+ "trained_with": {
+  "scikit_learn": "1.9.1",
+  "skops": "0.16.0"
+ },
+ "metrics_on_untouched_holdout": {
+  "roc_auc": 93.95,
+  "pr_auc": 90.91,
+  "pr_auc_baseline": 14.54,
+  "brier": 0.0331
+ },
+ "features": [
+  "Account length",
+  "Area code",
+  "Number vmail messages",
+  "Total day minutes",
+  "Total day calls",
+  "Total day charge",
+  "Total eve minutes",
+  "Total eve calls",
+  "Total eve charge",
+  "Total night minutes",
+  "Total night calls",
+  "Total night charge",
+  "Total intl minutes",
+  "Total intl calls",
+  "Total intl charge",
+  "Customer service calls",
+  "State",
+  "International plan",
+  "Voice mail plan"
+ ],
+ "top_features": [
+  "Total day minutes",
+  "International plan",
+  "Customer service calls",
+  "Total intl calls",
+  "Total intl minutes",
+  "Number vmail messages"
+ ],
+ "sha256": "eb1933afd3495e411f71db0d2ab7f39ab480d6785960d7f209a41ca7146955ce",
+ "bytes": 4196864,
+ "limitations": [
+  "Small public dataset: use as an example or a starting point, not as a model for your own customers.",
+  "Probabilities are calibrated for this dataset only; another population needs its own model.",
+  "Loads only with a compatible scikit-learn version (the loader refuses mismatches)."
+ ]
+}

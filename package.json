@@ -4,10 +4,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "api": "python api/index.py",
+    "test:api": "python -m pytest tests -q",
+    "demo-data": "python scripts/generate_demo_dataset.py 5000"
   },
   "dependencies": {
-    "firebase": "^12.14.0"
+    "@firebase/analytics": "^0.10.0",
+    "@firebase/app": "^0.14.0",
+    "@firebase/auth": "^1.11.0",
+    "chart.js": "^4.4.3",
+    "html2canvas-pro": "^2.5.0"
   },
   "devDependencies": {
     "vite": "^8.0.14"
