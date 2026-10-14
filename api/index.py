@@ -1353,9 +1353,10 @@ def invites_create():
 
 
 def _send_invite_email(invite: dict, workspace_name: str, inviter: str | None) -> bool:
+    # The invitee has no account yet, so their name is unknown: the email greets them with "Hi there".
     base = mailer.app_url() or request.host_url.rstrip('/')
     from urllib.parse import quote
-    return mailer.send('invite', invite['email'], name=invite['email'].split('@')[0], workspace=workspace_name, role=invite['role'],
+    return mailer.send('invite', invite['email'], name=None, workspace=workspace_name, role=invite['role'],
                        inviter=inviter, token=invite['token'], link=f"{base}/?invite={quote(invite['token'])}",
                        expires_days=tenancy.INVITE_TTL_DAYS)
 
