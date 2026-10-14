@@ -78,11 +78,15 @@ def _wordmark(color_churn: str, color_sight: str, size: int) -> str:
             f'Churn<span style="color:{color_sight};">Sight</span></span>')
 
 
+# Width / height of public/brand/churnsight-logo-email*.png (1146x300; built by scripts/build_logo.py).
+LOGO_ASPECT = 1146 / 300
+
+
 def _logo_html(reverse: bool = False, height: int = 52) -> str:
     """Logo image with a text wordmark as alt/fallback (shown when images are blocked or no URL is configured)."""
     url = _logo_url(reverse)
     if url:
-        width = round(height * 440 / 103)
+        width = round(height * LOGO_ASPECT)
         return (f'<img src="{_e(url)}" alt="ChurnSight" width="{width}" height="{height}" '
                 f'style="display:block;margin:0 auto;width:{width}px;height:{height}px;border:0;outline:none;text-decoration:none;'
                 f'font:700 26px/1.2 Helvetica,Arial,sans-serif;color:{"#ffffff" if reverse else INDIGO};">')
