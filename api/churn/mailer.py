@@ -23,16 +23,21 @@ log = logging.getLogger('churnsight.mailer')
 
 TIMEOUT_S = 15
 
-# Brand palette (matches static/style.css)
-INK = '#14242A'
-TEAL = '#0B3D4A'
-TEAL_2 = '#147A7A'
-GOLD = '#E8A838'
-CREAM = '#F3EFE6'
-MUTED = '#4A6068'
-FAINT = '#7A8F96'
-LINE = '#E3DED2'
-BOX = '#FAF7F0'
+# Brand palette (ChurnSight brand guide). Contrast on white checked to WCAG AA:
+# Electric Blue 4.65:1 (buttons with white text, links), Slate 4.76:1 (secondary text), Deep Indigo 16.6:1 (text).
+NAVY = '#071426'        # Midnight Navy: dark surfaces (footer)
+INDIGO = '#10194B'      # Deep Indigo: headings and primary text
+BLUE = '#176BFA'        # Electric Blue: primary actions and links
+BRIGHT = '#1688F8'      # Bright Blue: wordmark and highlights (large text only on white)
+CYAN = '#09C9E8'        # Cyan: data highlights and accents
+TEAL = '#13D9B4'        # Teal: AI / intelligence accents
+VIOLET = '#6338F5'      # Violet: gradient start, secondary accent
+PAGE = '#F7F9FC'        # Page background
+LINE = '#DCE4EE'        # Borders and dividers
+MUTED = '#64748B'       # Slate: secondary text
+INK = INDIGO
+BOX = PAGE
+BRAND_GRADIENT = f'linear-gradient(90deg,{VIOLET} 0%,{BLUE} 50%,{CYAN} 100%)'
 
 FEATURES = [
     ('Risk scoring', 'Calibrated churn probability for every account, ranked by revenue at risk'),
@@ -60,20 +65,20 @@ def _logo_html() -> str:
     url = os.environ.get('EMAIL_LOGO_URL', '')
     if url:
         return f'<img src="{_e(url)}" alt="ChurnSight" height="44" style="display:block;margin:0 auto;height:44px;border:0;outline:none;">'
-    # Text wordmark fallback: a teal tile with a gold dot, then the name. No SVG (Gmail strips it).
+    # Text wordmark fallback until a logo URL is set: gradient tile with an upward-trend glyph, then the wordmark. No SVG (Gmail strips it).
     return (
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
-        f'<td style="width:40px;height:40px;background:{TEAL};border-radius:10px;text-align:center;vertical-align:middle;'
-        f'font:700 20px/40px Georgia,serif;color:{GOLD};">&#8599;</td>'
-        f'<td style="padding-left:12px;font:400 30px/40px Georgia,\'DM Serif Display\',serif;color:{INK};letter-spacing:-0.5px;">'
-        f'Churn<span style="color:{TEAL_2};">Sight</span></td></tr></table>'
+        f'<td style="width:42px;height:42px;background:{BLUE};background-image:{BRAND_GRADIENT};border-radius:11px;text-align:center;'
+        f'vertical-align:middle;font:700 22px/42px Helvetica,Arial,sans-serif;color:#ffffff;">&#8599;</td>'
+        f'<td style="padding-left:12px;font:700 30px/42px Helvetica,Arial,sans-serif;color:{INDIGO};letter-spacing:-0.8px;">'
+        f'Churn<span style="color:{BRIGHT};">Sight</span></td></tr></table>'
     )
 
 
 def _button(label: str, url: str) -> str:
     return (
         '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:28px auto 8px;"><tr>'
-        f'<td style="background:{TEAL};border-radius:10px;">'
+        f'<td style="background:{BLUE};border-radius:10px;">'
         f'<a href="{_e(url)}" style="display:inline-block;padding:15px 34px;font:700 16px/1 Helvetica,Arial,sans-serif;'
         f'color:#ffffff;text-decoration:none;border-radius:10px;">{label} &rarr;</a></td></tr></table>'
     )
@@ -87,7 +92,7 @@ def _info_box(rows: list[tuple[str, str, str]]) -> str:
             val = (f'<div style="display:inline-block;margin-top:6px;padding:12px 18px;background:#ffffff;border:1px solid {LINE};'
                    f'border-radius:8px;font:700 20px/1.2 \'SFMono-Regular\',Menlo,Consolas,monospace;letter-spacing:1px;color:{INK};">{value}</div>')
         elif kind == 'link':
-            val = f'<div style="margin-top:4px;font:600 16px/1.4 Helvetica,Arial,sans-serif;color:{TEAL_2};word-break:break-all;">{value}</div>'
+            val = f'<div style="margin-top:4px;font:600 16px/1.4 Helvetica,Arial,sans-serif;color:{BLUE};word-break:break-all;">{value}</div>'
         elif kind == 'email':
             val = f'<div style="margin-top:4px;font:600 16px/1.4 Helvetica,Arial,sans-serif;color:{INK};word-break:break-all;">{value}</div>'
         else:
@@ -104,7 +109,7 @@ def _features() -> str:
         border = f'border-top:1px solid {LINE};' if i else ''
         rows.append(
             f'<tr><td style="{border}padding:14px 20px;"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr>'
-            f'<td valign="top" style="padding-top:3px;"><div style="width:14px;height:14px;border-radius:7px;background:{GOLD};"></div></td>'
+            f'<td valign="top" style="padding-top:3px;"><div style="width:14px;height:14px;border-radius:7px;background:{CYAN};background-image:linear-gradient(135deg,{BLUE},{TEAL});"></div></td>'
             f'<td style="padding-left:16px;"><div style="font:700 16px/1.4 Helvetica,Arial,sans-serif;color:{INK};">{title}</div>'
             f'<div style="font:400 14px/1.5 Helvetica,Arial,sans-serif;color:{MUTED};">{text}</div></td></tr></table></td></tr>')
     return (f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 4px;background:{BOX};'
@@ -121,27 +126,28 @@ def _layout(preheader: str, title: str, subtitle: str, body_html: str, footnote:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light only"><title>{_e(title)}</title></head>
-<body style="margin:0;padding:0;background:#EEF1F2;">
+<body style="margin:0;padding:0;background:{PAGE};">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;">{_e(preheader)}</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EEF1F2;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:{PAGE};">
 <tr><td align="center" style="padding:24px 12px;">
-<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;border-top:6px solid {TEAL_2};">
-  <tr><td style="padding:36px 40px 0;background:{CREAM};background-image:radial-gradient(circle at 90% 0%,rgba(232,168,56,0.18) 0,rgba(232,168,56,0) 55%);">
+<table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid {LINE};">
+  <tr><td style="height:6px;line-height:6px;font-size:0;background:{BLUE};background-image:{BRAND_GRADIENT};">&nbsp;</td></tr>
+  <tr><td style="padding:36px 40px 0;background:{PAGE};background-image:radial-gradient(circle at 92% 0%,rgba(9,201,232,0.16) 0,rgba(9,201,232,0) 45%),radial-gradient(circle at 8% 100%,rgba(99,56,245,0.10) 0,rgba(99,56,245,0) 40%);">
     {_logo_html()}
     <div style="height:28px;line-height:28px;">&nbsp;</div>
   </td></tr>
   <tr><td style="padding:0 40px;"><div style="border-top:1px solid {LINE};"></div></td></tr>
   <tr><td style="padding:32px 40px 8px;text-align:center;">
-    <h1 style="margin:0;font:400 30px/1.25 Georgia,'DM Serif Display',serif;color:{INK};">{title}</h1>
-    <p style="margin:12px 0 0;font:400 15px/1.5 Helvetica,Arial,sans-serif;color:{FAINT};">{subtitle}</p>
+    <h1 style="margin:0;font:800 30px/1.25 Helvetica,Arial,sans-serif;color:{INDIGO};letter-spacing:-0.5px;">{title}</h1>
+    <p style="margin:12px 0 0;font:400 15px/1.5 Helvetica,Arial,sans-serif;color:{MUTED};">{subtitle}</p>
   </td></tr>
   <tr><td style="padding:24px 40px 8px;">{body_html}</td></tr>
   <tr><td style="padding:8px 40px 32px;text-align:center;">
-    <p style="margin:0;font:400 13px/1.6 Helvetica,Arial,sans-serif;color:#A7B4B8;">{footnote}</p>
+    <p style="margin:0;font:400 13px/1.6 Helvetica,Arial,sans-serif;color:{MUTED};">{footnote}</p>
   </td></tr>
-  <tr><td style="background:{TEAL};padding:26px 40px;text-align:center;">
-    <div style="font:400 24px/1.2 Georgia,'DM Serif Display',serif;color:#ffffff;">Churn<span style="color:{GOLD};">Sight</span></div>
-    <div style="margin-top:8px;font:400 12px/1.5 Helvetica,Arial,sans-serif;color:#8FB3B8;">&copy; {year} ChurnSight &middot; {_e(host)}</div>
+  <tr><td style="background:{NAVY};padding:26px 40px;text-align:center;">
+    <div style="font:700 24px/1.2 Helvetica,Arial,sans-serif;color:#ffffff;letter-spacing:-0.5px;">Churn<span style="color:{CYAN};">Sight</span></div>
+    <div style="margin-top:8px;font:400 12px/1.5 Helvetica,Arial,sans-serif;color:#8FA3BF;">&copy; {year} ChurnSight &middot; {_e(host)}</div>
   </td></tr>
 </table>
 </td></tr></table>
@@ -198,7 +204,7 @@ def render(kind: str, **c) -> tuple[str, str, str]:
                      'password reset and alerts.')
                 + _info_box([('Email', _e(c['email']), 'email')])
                 + _button('Confirm email', link)
-                + _p('The link expires after a while; you can request a new one from the app.', 14, FAINT, '20px 0 0'))
+                + _p('The link expires after a while; you can request a new one from the app.', 14, MUTED, '20px 0 0'))
         html_ = _layout('Confirm your email address for ChurnSight', 'Confirm your email', 'One quick step to secure your account', body,
                         'Didn’t create a ChurnSight account? Ignore this email and the address won’t be confirmed.')
         text = f"Hi {c.get('name') or 'there'},\n\nConfirm your email for ChurnSight: {link}\n\nDidn't sign up? Ignore this email.\n"
