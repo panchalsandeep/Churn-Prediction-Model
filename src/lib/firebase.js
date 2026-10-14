@@ -39,6 +39,7 @@ export function loadFirebase() {
       GoogleAuthProvider: authMod.GoogleAuthProvider,
       signOut: authMod.signOut,
       sendPasswordResetEmail: authMod.sendPasswordResetEmail,
+      sendEmailVerification: authMod.sendEmailVerification,
     };
   })();
   return cached;

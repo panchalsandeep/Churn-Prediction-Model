@@ -83,7 +83,7 @@ function showInvite(inv) {
   const link = `${location.origin}/?invite=${encodeURIComponent(inv.token)}`;
   box.hidden = false;
   box.innerHTML = `<strong>Invitation for ${escapeHtml(inv.email)} (${escapeHtml(inv.role)})</strong>
-    <p>Share this link once, over a private channel. It cannot be shown again.</p>
+    <p>${inv.emailed ? `We emailed the invitation to ${escapeHtml(inv.email)}. You can also share this link once, over a private channel.` : 'Share this link once, over a private channel. It cannot be shown again.'}</p>
     <div class="invite-link"><code id="invite-link-text">${escapeHtml(link)}</code><button class="btn-secondary btn-small" id="invite-copy" type="button">Copy</button></div>`;
   replay(box, 'pop-in');
   $('invite-copy').addEventListener('click', async () => {

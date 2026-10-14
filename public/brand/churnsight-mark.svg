@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 22 320 341" width="320" height="341" role="img" aria-label="ChurnSight">
+  <defs>
+    <linearGradient id="cs-c" x1="170" y1="310" x2="410" y2="50" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6338F5"/><stop offset="0.38" stop-color="#5A45F8"/><stop offset="0.66" stop-color="#176BFA"/><stop offset="1" stop-color="#09C9E8"/>
+    </linearGradient>
+    <linearGradient id="cs-inner" x1="313" y1="105" x2="248" y2="262" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#13D9B4"/><stop offset="0.55" stop-color="#09C9E8"/><stop offset="1" stop-color="#176BFA"/>
+    </linearGradient>
+    <linearGradient id="cs-dot" x1="358" y1="330" x2="398" y2="290" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6338F5"/><stop offset="1" stop-color="#176BFA"/>
+    </linearGradient>
+    <linearGradient id="cs-gem" x1="412" y1="308" x2="435" y2="285" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1688F8"/><stop offset="1" stop-color="#09C9E8"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke-linecap="round">
+    <path d="M320.3 333.2 A141 141 0 1 1 372.3 65.8" stroke="url(#cs-c)" stroke-width="45"/>
+    <path d="M248.3 257.5 A90 90 0 0 1 313.0 105.0" stroke="url(#cs-inner)" stroke-width="20"/>
+    <path d="M375.2 257.2 A88 88 0 0 1 309.9 282.9" stroke="#1688F8" stroke-width="21"/>
+  </g>
+  <circle cx="417.5" cy="116.5" r="36" fill="#09C9E8"/>
+  <circle cx="378" cy="310" r="24.5" fill="url(#cs-dot)"/>
+  <rect x="414" y="287" width="19" height="19" rx="3.5" transform="rotate(45 423.5 296.5)" fill="url(#cs-gem)"/>
+</svg>
