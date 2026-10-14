@@ -18,3 +18,7 @@ venv/
 # Public benchmark datasets are downloaded by scripts/download_datasets.py, never committed
 datasets/raw/
 datasets/ready/
+
+# Secrets: never commit service-account keys
+*firebase-adminsdk*.json
+*service-account*.json
