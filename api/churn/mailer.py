@@ -3,7 +3,8 @@
 Each message is rendered as table-based HTML with inline styles (what Gmail, Outlook and Apple Mail render reliably) plus a
 plain-text alternative, and sent over SMTP using the same settings as the alert channels:
 SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_STARTTLS (1), SMTP_FROM, and APP_URL for links.
-Optional: EMAIL_FROM_NAME (display name, default "ChurnSight"), EMAIL_LOGO_URL (absolute https URL of the logo image).
+Optional: EMAIL_FROM_NAME (display name, default "ChurnSight"); EMAIL_LOGO_URL / EMAIL_LOGO_REVERSE_URL to override the logo
+images, which default to APP_URL/brand/churnsight-logo-email(-reverse).png served by the app.
 
 Sending never blocks or fails a request: messages go out on a background thread and failures are logged.
 """
@@ -61,18 +62,31 @@ def _e(value) -> str:
 
 # ── layout ──────────────────────────────────────────────────────────────────────────────────────────
 
-def _logo_html() -> str:
-    url = os.environ.get('EMAIL_LOGO_URL', '')
+def _logo_url(reverse: bool = False) -> str:
+    """PNG logo for email (Gmail and Outlook do not render SVG). Served by the app at /brand/; override with EMAIL_LOGO_URL."""
+    if not reverse and os.environ.get('EMAIL_LOGO_URL'):
+        return os.environ['EMAIL_LOGO_URL']
+    if reverse and os.environ.get('EMAIL_LOGO_REVERSE_URL'):
+        return os.environ['EMAIL_LOGO_REVERSE_URL']
+    if not app_url():
+        return ''
+    return f"{app_url()}/brand/churnsight-logo-email{'-reverse' if reverse else ''}.png"
+
+
+def _wordmark(color_churn: str, color_sight: str, size: int) -> str:
+    return (f'<span style="font:700 {size}px/1.2 Helvetica,Arial,sans-serif;color:{color_churn};letter-spacing:-0.5px;">'
+            f'Churn<span style="color:{color_sight};">Sight</span></span>')
+
+
+def _logo_html(reverse: bool = False, height: int = 52) -> str:
+    """Logo image with a text wordmark as alt/fallback (shown when images are blocked or no URL is configured)."""
+    url = _logo_url(reverse)
     if url:
-        return f'<img src="{_e(url)}" alt="ChurnSight" height="44" style="display:block;margin:0 auto;height:44px;border:0;outline:none;">'
-    # Text wordmark fallback until a logo URL is set: gradient tile with an upward-trend glyph, then the wordmark. No SVG (Gmail strips it).
-    return (
-        '<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center"><tr>'
-        f'<td style="width:42px;height:42px;background:{BLUE};background-image:{BRAND_GRADIENT};border-radius:11px;text-align:center;'
-        f'vertical-align:middle;font:700 22px/42px Helvetica,Arial,sans-serif;color:#ffffff;">&#8599;</td>'
-        f'<td style="padding-left:12px;font:700 30px/42px Helvetica,Arial,sans-serif;color:{INDIGO};letter-spacing:-0.8px;">'
-        f'Churn<span style="color:{BRIGHT};">Sight</span></td></tr></table>'
-    )
+        width = round(height * 440 / 103)
+        return (f'<img src="{_e(url)}" alt="ChurnSight" width="{width}" height="{height}" '
+                f'style="display:block;margin:0 auto;width:{width}px;height:{height}px;border:0;outline:none;text-decoration:none;'
+                f'font:700 26px/1.2 Helvetica,Arial,sans-serif;color:{"#ffffff" if reverse else INDIGO};">')
+    return (_wordmark('#ffffff', CYAN, 24) if reverse else _wordmark(INDIGO, BRIGHT, 30))
 
 
 def _button(label: str, url: str) -> str:
@@ -146,7 +160,7 @@ def _layout(preheader: str, title: str, subtitle: str, body_html: str, footnote:
     <p style="margin:0;font:400 13px/1.6 Helvetica,Arial,sans-serif;color:{MUTED};">{footnote}</p>
   </td></tr>
   <tr><td style="background:{NAVY};padding:26px 40px;text-align:center;">
-    <div style="font:700 24px/1.2 Helvetica,Arial,sans-serif;color:#ffffff;letter-spacing:-0.5px;">Churn<span style="color:{CYAN};">Sight</span></div>
+    {_logo_html(reverse=True, height=38)}
     <div style="margin-top:8px;font:400 12px/1.5 Helvetica,Arial,sans-serif;color:#8FA3BF;">&copy; {year} ChurnSight &middot; {_e(host)}</div>
   </td></tr>
 </table>

@@ -497,6 +497,17 @@ def demo_csv(rows: int) -> str:
     return _demo_cache[rows]
 
 
+@app.route('/brand/<path:filename>')
+def brand_assets(filename):
+    """Logo files (SVG for the web, PNG for email clients that do not render SVG)."""
+    brand = os.path.join(DIST_DIR, 'brand')
+    if not os.path.isdir(brand):
+        return jsonify({'error': 'Not found'}), 404
+    resp = send_from_directory(brand, filename)
+    resp.headers['Cache-Control'] = 'public, max-age=86400'
+    return resp
+
+
 @app.route('/sample_data.csv')
 @app.route('/api/demo.csv')
 def sample_csv():
