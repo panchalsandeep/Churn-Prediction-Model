@@ -369,6 +369,21 @@ async function handleSignOut() {
   }
 }
 
+/** After the user clicks the verification link (often in another tab), the signed-in session still holds an ID token
+ *  that says email_verified: false, and the server would keep refusing verified-only rights. Reload the Firebase user and,
+ *  once it is verified, force a fresh token so the next API call carries the new claim. Returns true when it changed. */
+async function syncEmailVerification(user) {
+  if (!user || user.emailVerified) return false;
+  try {
+    await user.reload();
+    if (!user.emailVerified) return false;
+    await user.getIdToken(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function refreshAdminAccess() {
   try {
     const body = await get('/admin/whoami');
@@ -408,6 +423,7 @@ async function initAuthUI() {
       try { localStorage.setItem(SESSION_HINT, '1'); } catch { /* ignore */ }
       hideAuthOverlay();
       showToast(`Welcome back, ${user.displayName || user.email}!`);
+      await syncEmailVerification(user);
       await refreshAdminAccess();
       await acceptInviteFromUrl();
       if (await loadMe()) { $('access-gate').hidden = true; await reloadResults(); }
@@ -423,6 +439,15 @@ async function initAuthUI() {
 }
 
 $('gate-signout').addEventListener('click', () => (fb ? handleSignOut() : location.reload()));
+
+// Coming back from the verification email: pick up the verified status without a sign-out / sign-in.
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState !== 'visible' || !state.user) return;
+  if (await syncEmailVerification(state.user)) {
+    await refreshAdminAccess();
+    showToast('Email verified.');
+  }
+});
 $('gate-invite').addEventListener('submit', async e => {
   e.preventDefault();
   try {
