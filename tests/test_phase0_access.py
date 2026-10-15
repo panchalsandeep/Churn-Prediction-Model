@@ -29,12 +29,12 @@ def auth(monkeypatch):
     monkeypatch.delenv('REQUIRE_MFA_ROLES', raising=False)
 
     class Auth:
-        def token(self, uid, email, provider='password', mfa=False, ws=None, **extra):
-            t = f'tok-{uid}-{provider}-{int(mfa)}'
+        def token(self, uid, email, provider='password', mfa=False, ws=None, verified=True, **extra):
+            t = f'tok-{uid}-{provider}-{int(mfa)}-{int(verified)}'
             fb = {'sign_in_provider': provider}
             if mfa:
                 fb['sign_in_second_factor'] = 'phone'
-            claims[t] = {'uid': uid, 'email': email, 'firebase': fb, **extra}
+            claims[t] = {'uid': uid, 'email': email, 'email_verified': verified, 'firebase': fb, **extra}
             h = {'Authorization': f'Bearer {t}'}
             if ws:
                 h['X-Workspace'] = ws
@@ -357,3 +357,15 @@ def test_customer_ids_can_be_pseudonymised_stably_per_workspace(client, env, aut
     lookup = client.post('/api/privacy/lookup', json={'ids': ['CUST-000001']}, headers=team['adam']).get_json()['ids']['CUST-000001']
     assert lookup.startswith('h_') and lookup == crypto.pseudonymize_id(ws, 'CUST-000001')
     assert crypto.pseudonymize_id(ws, 'CUST-000001') != crypto.pseudonymize_id('another-workspace', 'CUST-000001')
+
+
+def test_unverified_admin_email_gets_no_admin_rights(client, auth):
+    """SEC-01: signing up with an ADMIN_EMAILS address without verifying it must not make you a platform admin."""
+    fake = auth.token('impostor', 'root@platform.io', verified=False)
+    assert client.get('/api/admin/users', headers=fake).status_code == 403
+    res = client.post('/api/workspaces', json={'name': 'Stolen', 'owner_email': 'x@evil.io'}, headers=fake)
+    assert res.status_code == 403
+    # The same address, verified, is a platform admin.
+    real = auth.token('root', 'root@platform.io')
+    res = client.post('/api/workspaces', json={'name': 'Legit', 'owner_email': 'owner@legit.io'}, headers=real)
+    assert res.status_code == 201, res.get_json()

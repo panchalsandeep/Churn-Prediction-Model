@@ -92,8 +92,12 @@ function renderPrediction(data) {
 }
 
 /* ── Form ───────────────────────────────────────────────────── */
+// Column names come from the uploaded CSV, so they never go into markup raw: the element id is the
+// name's UTF-8 bytes in hex (always [0-9a-f]), and every other attribute or text is escaped.
+const fieldId = name => 'pf-' + Array.from(new TextEncoder().encode(String(name)), b => b.toString(16).padStart(2, '0')).join('');
+
 function fieldHtml(f) {
-  const id = `pf-${f.name}`;
+  const id = fieldId(f.name);
   const label = `<label for="${id}">${escapeHtml(f.label)}</label>`;
   if (f.kind === 'category') {
     const opts = [...new Set([String(f.default), ...f.options])];
@@ -101,8 +105,8 @@ function fieldHtml(f) {
       opts.map(o => `<option ${o === String(f.default) ? 'selected' : ''}>${escapeHtml(o)}</option>`).join('')}</select></div>`;
   }
   const step = f.integer ? 1 : 'any';
-  return `<div class="form-group">${label}<input type="number" id="${id}" data-name="${escapeHtml(f.name)}" value="${f.default}" step="${step}"
-    title="Typical range ${f.min} – ${f.max}" /></div>`;
+  return `<div class="form-group">${label}<input type="number" id="${id}" data-name="${escapeHtml(f.name)}" value="${escapeHtml(f.default)}" step="${step}"
+    title="Typical range ${escapeHtml(f.min)} – ${escapeHtml(f.max)}" /></div>`;
 }
 
 function buildForm(schema) {
@@ -118,7 +122,7 @@ function buildForm(schema) {
 function readForm() {
   const values = {};
   form.fields.forEach(f => {
-    const el = $(`pf-${f.name}`);
+    const el = $(fieldId(f.name));
     values[f.name] = f.kind === 'number' ? (el.value === '' ? null : Number(el.value)) : el.value;
   });
   return values;
@@ -132,7 +136,7 @@ export function simulateCustomer(id, attrs) {
   if (!form) { showToast('Train a model first.', 'error'); return; }
   const timeCol = state.results?.schema?.time_col;
   form.fields.forEach(f => {
-    const el = $(`pf-${f.name}`);
+    const el = $(fieldId(f.name));
     if (!el) return;
     let v = attrs[f.name];
     if (v == null && f.name.endsWith('_age_days')) {           // derived from a date column

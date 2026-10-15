@@ -81,9 +81,16 @@ def auth_configured() -> bool:
 
 
 def is_admin_token(decoded_token) -> bool:
+    """Platform admin: the custom `admin` claim, or an ADMIN_EMAILS address that Firebase has verified.
+
+    An unverified address proves nothing (anyone can sign up with someone else's email and password), so it never
+    grants admin rights. Google sign-in addresses arrive verified; password accounts must verify their email first."""
     if not decoded_token:
         return False
-    return (decoded_token.get('email') or '').lower() in ADMIN_EMAILS or decoded_token.get('admin') is True
+    if decoded_token.get('admin') is True:
+        return True
+    email = (decoded_token.get('email') or '').lower()
+    return bool(email) and email in ADMIN_EMAILS and decoded_token.get('email_verified') is True
 
 
 AUTO_PROVISION = os.environ.get('AUTO_PROVISION', '0' if config.PRODUCTION else '1').lower() in ('1', 'true', 'yes')
